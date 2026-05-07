@@ -15,6 +15,50 @@ logger = get_logger(__name__)
 
 _VALID_ROUNDS = set(get_args(RoundType))
 
+# Python-side alias map — applied after LLM parse as a reliable fallback.
+# Keys are lowercase substrings; value is the canonical round type.
+_ROUND_ALIAS_MAP: list[tuple[str, str]] = [
+    ("coding ability and problem solving", "dsa"),
+    ("coding ability", "dsa"),
+    ("problem solving", "dsa"),
+    ("data structures", "dsa"),
+    ("algorithms", "dsa"),
+    ("technical screen", "dsa"),
+    ("coding round", "dsa"),
+    ("coding interview", "dsa"),
+    ("leetcode", "dsa"),
+    ("low level design", "lld"),
+    ("object oriented design", "lld"),
+    ("oo design", "lld"),
+    ("machine coding", "lld"),
+    ("object design", "lld"),
+    ("system design", "sysdesign"),
+    ("high level design", "sysdesign"),
+    ("architecture round", "sysdesign"),
+    ("design round", "sysdesign"),
+    ("behavioural", "behavioral"),
+    ("culture fit", "behavioral"),
+    ("bar raiser", "behavioral"),
+    ("hr round", "behavioral"),
+    ("hiring manager", "hiring_manager"),
+    ("manager round", "hiring_manager"),
+    ("leadership round", "hiring_manager"),
+    ("hm round", "hiring_manager"),
+]
+
+
+def _map_label_to_round(label: str) -> str | None:
+    """Map a free-form round label to a canonical RoundType."""
+    lower = label.lower()
+    # Exact canonical match first
+    if lower in _VALID_ROUNDS:
+        return lower
+    # Substring alias matching (longest alias wins via list order)
+    for alias, canonical in _ROUND_ALIAS_MAP:
+        if alias in lower:
+            return canonical
+    return None
+
 _SYSTEM = """Today is {today}.
 
 Extract interview prep details from the user message. Return ONLY valid JSON:
@@ -124,15 +168,29 @@ async def parse_prep_intent(message: str) -> PrepIntent:
         )
         data = json.loads(strip_fences(raw))
         rounds = data.get("rounds")
+        round_labels = data.get("round_labels") or None
+
+        # Filter LLM-produced rounds to valid canonical types
         if rounds:
             rounds = [r for r in rounds if r in _VALID_ROUNDS]
+
+        # Fallback: if LLM didn't produce canonical rounds, try mapping from labels
+        # Also catches cases where the user typed the label directly in the message
+        if not rounds:
+            labels_to_map = round_labels or []
+            # Also try mapping raw words from the original message
+            mapped = [_map_label_to_round(l) for l in labels_to_map]
+            if not any(mapped):
+                mapped = [_map_label_to_round(message)]
+            rounds = list(dict.fromkeys(r for r in mapped if r)) or None
+
         return PrepIntent(
             company=data.get("company"),
             role=data.get("role"),
             interview_date=data.get("interview_date"),
             days_until_interview=data.get("days_until_interview"),
             rounds=rounds or None,
-            round_labels=data.get("round_labels") or None,
+            round_labels=round_labels,
         )
     except Exception as exc:
         logger.warning("parse_prep_intent.failed", error=str(exc), message=message, exc_info=True)
