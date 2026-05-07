@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import hmac
-import json
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -9,15 +8,19 @@ from app.config import settings
 from app.db.repos.interviews import InterviewRepository
 from app.db.repos.prep_plans import PrepPlanRepository
 from app.db.session import async_session_factory
-from app.integrations.llm_client import complete_fast as complete
 from app.integrations.github_client import commit_file
 from app.lib.logging import get_logger
 from app.lib.user_context import get_user_context
 from app.schemas.webhooks import MailgunInbound
-from app.tools.classify_rounds import classify_rounds
 from app.tools.generate_plan import generate_plan
+from app.tools.parse_prep_intent import parse_prep_intent
 
 router = APIRouter()
+logger = get_logger(__name__)
+
+_background_tasks: set[asyncio.Task] = set()
+
+_REGISTRATION_SUBJECTS = {"register", "signup", "sign up", "sign-up"}
 
 
 def _first_heading(plan_md: str) -> str | None:
@@ -25,54 +28,18 @@ def _first_heading(plan_md: str) -> str | None:
         if line.strip().startswith("### "):
             return line.strip().lstrip("# ").strip()
     return None
-logger = get_logger(__name__)
-
-_background_tasks: set[asyncio.Task] = set()
-
-_PARSE_SYSTEM = """Extract the company name and role from a forwarded interview invite email.
-Return ONLY a JSON object: {"company": "...", "role": "..."}
-If you cannot determine one of the values, use "Unknown".
-"""
-
-_REGISTRATION_SUBJECTS = {"register", "signup", "sign up", "sign-up"}
 
 
 def _is_registration(payload: MailgunInbound) -> bool:
-    """Return True if this email is a registration request, not an interview forward.
-
-    V2: user emails subject "register" with github_token + vault_repo in body.
-    V1: always False — registration not yet implemented.
-    """
     return payload.subject.strip().lower() in _REGISTRATION_SUBJECTS
 
 
 async def _handle_registration(payload: MailgunInbound) -> None:
-    """Handle a registration email from a new user.
-
-    V2 implementation: parse github_token + vault_repo from body,
-    create User row keyed by payload.sender email, reply via Mailgun API.
-
-    V1: log and no-op — single owner only.
-    """
     logger.info(
         "inbox.registration.not_implemented",
         sender=payload.sender,
         hint="V2: parse body for github_token + vault_repo, create User row",
     )
-
-
-async def _parse_company_role(subject: str, body: str) -> tuple[str, str]:
-    raw = await complete(
-        messages=[{"role": "user", "content": f"Subject: {subject}\n\nBody:\n{body[:2000]}"}],
-        system=_PARSE_SYSTEM,
-        max_tokens=64,
-    )
-    try:
-        parsed = json.loads(raw.strip())
-        return parsed.get("company", "Unknown"), parsed.get("role", "Unknown")
-    except Exception as exc:
-        logger.warning("inbox.parse_company_role.failed", error=str(exc), exc_info=True)
-        return "Unknown", "Unknown"
 
 
 def _validate_mailgun_signature(timestamp: str, token: str, signature: str) -> None:
@@ -86,24 +53,34 @@ def _validate_mailgun_signature(timestamp: str, token: str, signature: str) -> N
 
 
 async def _run_pipeline(payload: MailgunInbound) -> None:
-    """Route inbound email: registration or interview forward."""
     if _is_registration(payload):
         await _handle_registration(payload)
         return
 
-    # V2: get_user_context(email=payload.sender) returns per-user GitHub config.
-    # V1: sender email is passed but ignored — always returns owner context.
     ctx = await get_user_context(email=payload.sender)
 
-    company, role = await _parse_company_role(payload.subject, payload.body_plain)
-    logger.info("inbox.parsed", company=company, role=role, sender=payload.sender)
+    raw = f"{payload.subject}\n\n{payload.body_plain[:2000]}"
+    intent = await parse_prep_intent(raw)
+    intent = intent.with_defaults()
 
-    jd_text = f"{payload.subject}\n\n{payload.body_plain}"
-    rounds = await classify_rounds(jd_text)
-    logger.info("inbox.classified", rounds=rounds)
+    company = intent.company or "Unknown"
+    role = intent.role or "Unknown"
+    rounds = intent.rounds or []
+    scheduled_for = None
+    if intent.interview_date:
+        from datetime import datetime, timezone
+        try:
+            scheduled_for = datetime.strptime(intent.interview_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
 
-    # Create one Interview per round — dedup by company+round so forwarding the
-    # same invite twice is idempotent.
+    logger.info("inbox.parsed", company=company, role=role, rounds=rounds, sender=payload.sender)
+
+    if not rounds:
+        logger.warning("inbox.no_rounds_classified", company=company)
+        return
+
+    # Create one Interview per round — dedup by company+round so forwarding twice is idempotent.
     interviews: list = []
     for rt in rounds:
         async with async_session_factory() as session:
@@ -112,7 +89,7 @@ async def _run_pipeline(payload: MailgunInbound) -> None:
                 interviews.append(existing)
             else:
                 created = await InterviewRepository(session).create(
-                    company=company, role=role, round_type=rt,
+                    company=company, role=role, round_type=rt, scheduled_for=scheduled_for,
                 )
                 interviews.append(created)
 
@@ -124,6 +101,7 @@ async def _run_pipeline(payload: MailgunInbound) -> None:
         company=company,
         role=role,
         round_types=rounds,
+        days_until_interview=intent.days_until_interview or 7,
     )
 
     vault_path_str = f"plans/{company.lower().replace(' ', '-')}-{interviews[0].id}.md"
@@ -146,7 +124,6 @@ async def _run_pipeline(payload: MailgunInbound) -> None:
         async with async_session_factory() as session:
             await PrepPlanRepository(session).create(
                 interview_id=interview.id,
-
                 vault_path=committed_path,
                 drill_label=drill_label,
             )
