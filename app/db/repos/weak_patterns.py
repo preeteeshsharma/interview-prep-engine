@@ -8,7 +8,7 @@ class WeakPatternRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def upsert(self, pattern: str, weight_bump: float, session_id: int | None = None) -> WeakPattern:
+    async def upsert(self, pattern: str, weight_bump: float) -> WeakPattern:
         result = await self._session.execute(
             select(WeakPattern).where(WeakPattern.pattern == pattern)
         )

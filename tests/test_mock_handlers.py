@@ -62,7 +62,7 @@ async def test_prep_idempotency_skips_llm_when_active_plan_exists():
     mock_pending.id = 10
 
     mock_interview_repo = AsyncMock()
-    mock_interview_repo.find_active_by_company_round.return_value = mock_interview
+    mock_interview_repo.find_or_create.return_value = mock_interview
 
     mock_plan_repo = AsyncMock()
     mock_plan_repo.get_pending.return_value = mock_pending
@@ -101,7 +101,7 @@ async def test_prep_reruns_llm_when_date_changes():
     mock_pending.id = 10
 
     mock_interview_repo = AsyncMock()
-    mock_interview_repo.find_active_by_company_round.return_value = mock_interview
+    mock_interview_repo.find_or_create.return_value = mock_interview
 
     mock_plan_repo = AsyncMock()
     mock_plan_repo.get_pending.return_value = mock_pending

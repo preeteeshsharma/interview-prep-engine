@@ -67,55 +67,49 @@ async def execute_prep(intent: PrepIntent, refresh: bool = False) -> str:
     company = final.company or "Unknown"
     role = final.role
     round_types = final.rounds
+    round_label = (final.round_labels or [None])[0]
+    single_round_type = round_types[0] if len(round_types) == 1 else None
 
     if not final.interview_date:
         return "Interview date is required."
-
     try:
         scheduled_for = datetime.strptime(final.interview_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError:
         return f"Couldn't parse date '{final.interview_date}'."
 
-    round_label = (final.round_labels or [None])[0]
-    single_round_type = round_types[0] if len(round_types) == 1 else None
-
-    # Find or create one Interview per round, check idempotency.
+    # Find or create one Interview per round; check idempotency.
     interviews_to_run: list[tuple] = []
     for rt in round_types:
         async with async_session_factory() as session:
-            match = await InterviewRepository(session).find_active_by_company_round(company, rt)
-
-        if match:
-            async with async_session_factory() as session:
-                pending = await PrepPlanRepository(session).get_pending(match.id)
-            date_changed = (
-                match.scheduled_for
-                and match.scheduled_for.date().isoformat() != final.interview_date
+            interview = await InterviewRepository(session).find_or_create(
+                company=company, role=role, round_type=rt, scheduled_for=scheduled_for,
             )
-            if pending and not date_changed and not refresh:
-                if len(round_types) == 1:
-                    return (
-                        f"Active plan for {match.company} ({rt}) already exists.\n"
-                        f"Send 'done {company.lower()} {rt.lower()} easy/medium/hard' to complete it, "
-                        f"or 'prep {company.lower()} {rt.lower()} {final.interview_date} refresh' to regenerate."
-                    )
-                continue
-            interviews_to_run.append((match, rt))
-        else:
-            async with async_session_factory() as session:
-                new_interview = await InterviewRepository(session).create(
-                    company=company, role=role, round_type=rt, scheduled_for=scheduled_for,
+            pending = await PrepPlanRepository(session).get_pending(interview.id)
+
+        date_changed = (
+            interview.scheduled_for
+            and interview.scheduled_for.date().isoformat() != final.interview_date
+        )
+        if pending and not date_changed and not refresh:
+            if len(round_types) == 1:
+                return (
+                    f"Active plan for {interview.company} ({rt}) already exists.\n"
+                    f"Send 'done {company.lower()} {rt.lower()} easy/medium/hard' to complete it, "
+                    f"or 'prep {company.lower()} {rt.lower()} {final.interview_date} refresh' to regenerate."
                 )
-            interviews_to_run.append((new_interview, rt))
+            continue
+        interviews_to_run.append((interview, rt))
 
     if not interviews_to_run:
         return f"All rounds for {company} already have active plans. Send 'done' when finished."
 
     ctx = await get_user_context()
-    effective_role = interviews_to_run[0][0].role if interviews_to_run[0][0].role != "Unknown" else role
+    first_interview = interviews_to_run[0][0]
+    effective_role = first_interview.role if first_interview.role != "Unknown" else role
+
     research = await run_research(company, effective_role, round_type=single_round_type, round_label=round_label)
     plan_md = await generate_plan(
-        interview_id=interviews_to_run[0][0].id,
+        interview_id=first_interview.id,
         company=company,
         role=effective_role,
         round_types=round_types,
@@ -123,7 +117,7 @@ async def execute_prep(intent: PrepIntent, refresh: bool = False) -> str:
         days_until_interview=final.days_until_interview or 7,
     )
     vault_path = await commit_plan_to_vault(
-        interviews_to_run[0][0].id, company, plan_md, research,
+        first_interview.id, company, plan_md, research,
         round_label=round_label or single_round_type,
         github_token=ctx.github_token,
         vault_repo=ctx.vault_repo,

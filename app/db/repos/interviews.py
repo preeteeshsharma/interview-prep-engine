@@ -44,6 +44,18 @@ class InterviewRepository:
         result = await self._session.execute(select(Interview))
         return list(result.scalars().all())
 
+    async def find_or_create(
+        self,
+        company: str,
+        role: str,
+        round_type: str | None,
+        scheduled_for: datetime | None,
+    ) -> Interview:
+        existing = await self.find_active_by_company_round(company, round_type)
+        if existing:
+            return existing
+        return await self.create(company=company, role=role, round_type=round_type, scheduled_for=scheduled_for)
+
     async def get(self, id: int) -> Interview | None:
         result = await self._session.execute(select(Interview).where(Interview.id == id))
         return result.scalar_one_or_none()
