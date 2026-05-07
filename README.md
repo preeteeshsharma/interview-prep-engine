@@ -34,20 +34,24 @@ A WhatsApp-based interview prep bot. You text it, it researches the company usin
 
 ---
 
-## What actually happens when you send `mock dsa`
+## What actually happens when you send `mock google dsa`
 
 ```
-1. Creates MockSession row in DB
+1. Loads vault context for google/dsa/ — latest research.md + latest plan.md
+   (picked independently by epoch — if one failed, you still get the best of each)
 
-2. Interviewer (Sonnet) opens with a question
+2. Creates MockSession row in DB
+
+3. Interviewer (Sonnet) opens with a question
    → system prompt = _ROUND_PROMPTS["dsa"] — Socratic hint ladder, never gives answer
    → for lld: enforces 5-phase HelloInterview framework from lld_problem_solving.md
+   → vault context injected: real questions asked at Google + candidate's prep plan
 
-3. Each reply triggers two parallel calls:
+4. Each reply triggers two parallel calls:
    a. Interviewer (Sonnet) — next adversarial question
    b. Observer (fast tier) — scores the turn against a rubric silently
 
-4. When you text "end":
+5. When you text "end":
    → Coach (Sonnet) reads full transcript + Observer scores
    → returns post-session critique with specific citations from your answers
    → MockSession finalized in DB
@@ -55,18 +59,21 @@ A WhatsApp-based interview prep bot. You text it, it researches the company usin
 
 ---
 
-## What actually happens when you send `study`
+## What actually happens when you send `study google dsa`
 
 ```
-1. Reads latest *-research.md from prep-vault GitHub repo
-   → scans {company}/{round}/ dirs, picks highest epoch = most recent run
+1. Loads vault context for google/dsa/
+   → latest *-research.md (by epoch) — questions, sources, themes
+   → latest *-plan.md (by epoch) — day-by-day drills, assigned LeetCode problems
+   Both picked independently — no need to re-run prep
 
-2. Tutor (Sonnet) opens the session
+2. Tutor (Sonnet) opens the session with both files as context
    → system prompt = interview_prep_assistant.md skill
    → lists all questions from research, classifies each:
      [LeetCode] — known platform problem
      [Local]    — build it on your machine
      [Bug Squash] — fix bugs in a given codebase
+   → references assigned problems from the plan
    → asks which one to start with
 
 3. Each reply: Tutor gives the next smallest useful hint (Socratic)
