@@ -24,23 +24,23 @@ When a field is ambiguous (multiple active interviews, or missing company/round)
 
 ## How it works
 
+**Email forwarding** — forward an interview invite to your Mailgun inbound address. The bot parses company and role, classifies rounds from the JD, creates Interview rows, generates a plan, and commits it to the vault — same as `prep` but triggered by email.
+
+![alt text](image.png)
+![alt text](image-5.png)
+
 **`prep`** — parses company, role, date, and rounds from free text. Runs a multi-source web search (Blind, Glassdoor, LeetCode Discuss, Reddit), generates a drill plan, and commits both to a private GitHub vault. One Interview row per `(company, round_type)` in the DB; the plan content lives in the vault.
 
 ![alt text](image-1.png)
 https://github.com/preeteeshsharma/prep-vault/
-
-**`mock`** — loads latest research + plan from the vault, opens an adversarial interview session. Each reply gets a next question from the Interviewer and a silent rubric score from the Observer. `end` triggers the Coach critique.
-![alt text](image-4.png)
 
 **`study`** — Socratic tutoring session using vault context. The tutor classifies each question (LeetCode / local build / bug squash) and gives hints on demand, never full solutions.
 
 ![alt text](image-2.png)
 ![alt text](image-3.png)
 
-**Email forwarding** — forward an interview invite to your Mailgun inbound address. The bot parses company and role, classifies rounds from the JD, creates Interview rows, generates a plan, and commits it to the vault — same as `prep` but triggered by email.
-
-![alt text](image.png)
-![alt text](image-5.png)
+**`mock`** — loads latest research + plan from the vault, opens an adversarial interview session. Each reply gets a next question from the Interviewer and a silent rubric score from the Observer. `end` triggers the Coach critique.
+![alt text](image-4.png)
 
 **Morning cron** — runs at 7am IST. Sends today's drill plan over WhatsApp, skips yesterday's uncompleted plan, bumps weak pattern weights for skipped drills.
 
