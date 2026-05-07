@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://user:password@host:5432/dbname"
     tavily_api_key: str = ""
     gemini_api_key: str = ""
+    google_cloud_project: str = ""
+    google_cloud_location: str = "us-central1"
+    vertex_service_account_json: str = ""  # full JSON content of GCP service account key
     env: str = "development"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

@@ -24,10 +24,27 @@ _MODEL_MAP: dict[str, str] = {
 
 class GeminiProvider:
     def __init__(self) -> None:
-        if not settings.gemini_api_key:
-            raise RuntimeError("GEMINI_API_KEY not set")
         from google import genai
-        self._client = genai.Client(api_key=settings.gemini_api_key)
+
+        if settings.google_cloud_project:
+            kwargs: dict = {
+                "vertexai": True,
+                "project": settings.google_cloud_project,
+                "location": settings.google_cloud_location,
+            }
+            if settings.vertex_service_account_json:
+                import json
+                from google.oauth2 import service_account
+                sa_info = json.loads(settings.vertex_service_account_json)
+                kwargs["credentials"] = service_account.Credentials.from_service_account_info(
+                    sa_info,
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                )
+            self._client = genai.Client(**kwargs)
+        elif settings.gemini_api_key:
+            self._client = genai.Client(api_key=settings.gemini_api_key)
+        else:
+            raise RuntimeError("Set GOOGLE_CLOUD_PROJECT (Vertex AI) or GEMINI_API_KEY")
 
     def _model(self, anthropic_model: str) -> str:
         return _MODEL_MAP.get(anthropic_model, "gemini-2.5-pro")

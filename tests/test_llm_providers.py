@@ -310,9 +310,9 @@ async def test_gemini_complete_returns_text():
         max_tokens=64,
     )
     assert result == "gemini answer"
-    # Confirm correct model mapping: Haiku → gemini-2.0-flash
+    # Confirm correct model mapping: Haiku → gemini-2.5-flash
     call_kwargs = mock_client.aio.models.generate_content.call_args
-    assert call_kwargs.kwargs["model"] == "gemini-2.0-flash"
+    assert call_kwargs.kwargs["model"] == "gemini-2.5-flash"
 
 
 @pytest.mark.asyncio
@@ -400,19 +400,50 @@ async def test_gemini_retries_on_server_error(monkeypatch):
     mock_sleep.assert_awaited_once()
 
 
+def test_gemini_uses_vertex_ai_when_project_set(monkeypatch):
+    """When GOOGLE_CLOUD_PROJECT is set, genai.Client is called with vertexai=True."""
+    import json
+    sa_json = json.dumps({"type": "service_account", "project_id": "test-project"})
+    mock_settings = MagicMock(
+        google_cloud_project="test-project",
+        google_cloud_location="us-central1",
+        vertex_service_account_json=sa_json,
+        gemini_api_key="",
+    )
+    monkeypatch.setattr("app.integrations.gemini_client.settings", mock_settings)
+
+    mock_client_instance = MagicMock()
+    mock_creds = MagicMock()
+
+    with patch("google.genai.Client", return_value=mock_client_instance) as mock_genai_client, \
+         patch("google.oauth2.service_account.Credentials.from_service_account_info", return_value=mock_creds):
+        from app.integrations.gemini_client import GeminiProvider
+        provider = GeminiProvider()
+
+    assert provider._client is mock_client_instance
+    call_kwargs = mock_genai_client.call_args.kwargs
+    assert call_kwargs.get("vertexai") is True
+    assert call_kwargs.get("project") == "test-project"
+    assert call_kwargs.get("location") == "us-central1"
+    assert call_kwargs.get("credentials") is mock_creds
+
+
 @pytest.mark.asyncio
 async def test_gemini_raises_on_missing_api_key(monkeypatch):
-    monkeypatch.setattr("app.integrations.gemini_client.settings", MagicMock(gemini_api_key=""))
+    monkeypatch.setattr(
+        "app.integrations.gemini_client.settings",
+        MagicMock(gemini_api_key="", google_cloud_project="", google_cloud_location="us-central1", vertex_service_account_json=""),
+    )
     from app.integrations.gemini_client import GeminiProvider
 
-    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
+    with pytest.raises(RuntimeError, match="GOOGLE_CLOUD_PROJECT|GEMINI_API_KEY"):
         GeminiProvider()
 
 
 def test_gemini_model_mapping_defaults_to_25_pro():
     from app.integrations.gemini_client import GeminiProvider
     provider = _make_gemini_provider()
-    assert provider._model("claude-haiku-4-5-20251001") == "gemini-2.0-flash"
+    assert provider._model("claude-haiku-4-5-20251001") == "gemini-2.5-flash"
     assert provider._model("claude-sonnet-4-6") == "gemini-2.5-pro"
     assert provider._model("claude-opus-4-7") == "gemini-2.5-pro"
     assert provider._model("some-unknown-model") == "gemini-2.5-pro"  # default
