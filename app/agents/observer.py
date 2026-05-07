@@ -41,11 +41,16 @@ class Observer:
             f"[{t['role'].upper()} turn {t['turn']}]: {t['content']}"
             for t in transcript
         )
-        raw = await complete(
-            messages=[{"role": "user", "content": f"Transcript:\n\n{formatted}"}],
-            system=_SYSTEM,
-            max_tokens=128,
-        )
+        try:
+            raw = await complete(
+                messages=[{"role": "user", "content": f"Transcript:\n\n{formatted}"}],
+                system=_SYSTEM,
+                max_tokens=128,
+            )
+        except Exception as exc:
+            logger.warning("observer.llm_failed", error=str(exc), exc_info=True)
+            return RubricScore(depth=3, clarity=3, edge_cases=3, time_management=3, requirements=3)
+
         try:
             return RubricScore.model_validate_json(strip_fences(raw))
         except Exception as exc:

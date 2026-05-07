@@ -81,11 +81,21 @@ class WaWindowState(Base):
 
 class AppConfig(Base):
     __tablename__ = "app_config"
+    __table_args__ = (
+        CheckConstraint(
+            "key IN ('llm.primary_provider', 'llm.fast_provider')",
+            name="ck_app_config_key",
+        ),
+        CheckConstraint(
+            "value IN ('anthropic', 'gemini')",
+            name="ck_app_config_value",
+        ),
+    )
 
     key: Mapped[str] = mapped_column(primary_key=True)
     value: Mapped[str]
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 

@@ -49,7 +49,9 @@ _HELP = (
 
 # Derived from the domain's RoundType; exclude rounds with no mock handler.
 _MOCK_ROUNDS: set[str] = {r.lower() for r in get_args(RoundType)} - {"hiring_manager", "unknown"}
-_DEFAULT_ROUND_TYPES: list[str] = [r for r in get_args(RoundType) if r not in {"hiring_manager", "unknown"}]
+
+# Strong references to in-flight background tasks — prevents GC before completion.
+_background_tasks: set[asyncio.Task] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -395,17 +397,26 @@ async def _handle_study(sender: str, args: list[str]) -> str:
                                 candidates.append(f.path)
                 if not candidates:
                     return None
-                # Epoch is the numeric prefix — pick the largest (most recent).
-                candidates.sort(key=lambda p: int(p.split("/")[-1].split("-")[0]), reverse=True)
+
+                def _epoch(path: str) -> int:
+                    try:
+                        return int(path.split("/")[-1].split("-")[0])
+                    except (ValueError, IndexError):
+                        return 0
+
+                candidates.sort(key=_epoch, reverse=True)
                 contents = repo.get_contents(candidates[0])
                 return contents.decoded_content.decode("utf-8")
-            except GithubException:
+            except GithubException as exc:
+                # 404 = company dir not created yet; anything else is unexpected.
+                if exc.status != 404:
+                    logger.warning("twilio.study.github_error", status=exc.status, error=str(exc))
                 return None
 
         import asyncio as _asyncio
         research_context = await _asyncio.to_thread(_find_latest_research)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("twilio.study.research_lookup_failed", error=str(exc), exc_info=True)
 
     if not research_context:
         return f"No research found for {interview.company}. Run 'prep {interview.company}' first to generate it."
@@ -526,7 +537,10 @@ async def twilio_webhook(request: Request) -> Response:
             except Exception as send_exc:
                 logger.error("twilio.fallback_send_failed", error=str(send_exc), exc_info=True)
 
-    asyncio.create_task(_bg())
+    # Keep a strong reference so the task isn't GC'd before it completes.
+    _task = asyncio.create_task(_bg())
+    _background_tasks.add(_task)
+    _task.add_done_callback(_background_tasks.discard)
 
     # Twilio expects a 200 with empty TwiML (we reply via API, not TwiML).
     return Response(content="<Response/>", media_type="application/xml")

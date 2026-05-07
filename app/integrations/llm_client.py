@@ -50,7 +50,7 @@ async def _fast() -> LLMProvider:
     return _gemini if (provider == "gemini" and _gemini is not None) else _anthropic
 
 
-async def _fallback(primary: LLMProvider) -> LLMProvider | None:
+def _fallback(primary: LLMProvider) -> LLMProvider | None:
     return _gemini if primary is _anthropic else _anthropic
 
 
@@ -67,11 +67,15 @@ async def complete(
         logger.debug("llm.provider", provider=type(primary).__name__, model=model)
         return result
     except Exception as exc:
-        fallback = await _fallback(primary)
+        fallback = _fallback(primary)
         if fallback is None:
             raise
-        logger.warning("llm.primary_failed", error=str(exc), fallback=type(fallback).__name__)
-    return await fallback.complete(messages, system, model, tokens)
+        logger.warning("llm.primary_failed", error=str(exc), fallback=type(fallback).__name__, exc_info=True)
+    try:
+        return await fallback.complete(messages, system, model, tokens)
+    except Exception as exc:
+        logger.error("llm.fallback_failed", error=str(exc), fallback=type(fallback).__name__, exc_info=True)
+        raise
 
 
 async def complete_with_tools(
@@ -88,11 +92,15 @@ async def complete_with_tools(
         logger.debug("llm.provider", provider=type(primary).__name__, model=model)
         return result
     except Exception as exc:
-        fallback = await _fallback(primary)
+        fallback = _fallback(primary)
         if fallback is None:
             raise
-        logger.warning("llm.primary_tools_failed", error=str(exc), fallback=type(fallback).__name__)
-    return await fallback.complete_with_tools(messages, system, tools, model, tokens)
+        logger.warning("llm.primary_tools_failed", error=str(exc), fallback=type(fallback).__name__, exc_info=True)
+    try:
+        return await fallback.complete_with_tools(messages, system, tools, model, tokens)
+    except Exception as exc:
+        logger.error("llm.fallback_tools_failed", error=str(exc), fallback=type(fallback).__name__, exc_info=True)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -114,11 +122,15 @@ async def complete_fast(
         logger.debug("llm.provider", provider=type(fast).__name__ + "-fast", model=_FAST_MODEL)
         return result
     except Exception as exc:
-        fallback = await _fallback(fast)
+        fallback = _fallback(fast)
         if fallback is None:
             raise
-        logger.warning("llm.fast_failed", error=str(exc), fallback=type(fallback).__name__)
-    return await fallback.complete(messages, system, _FAST_MODEL, tokens)
+        logger.warning("llm.fast_failed", error=str(exc), fallback=type(fallback).__name__, exc_info=True)
+    try:
+        return await fallback.complete(messages, system, _FAST_MODEL, tokens)
+    except Exception as exc:
+        logger.error("llm.fast_fallback_failed", error=str(exc), fallback=type(fallback).__name__, exc_info=True)
+        raise
 
 
 async def complete_fast_with_tools(
@@ -134,8 +146,12 @@ async def complete_fast_with_tools(
         logger.debug("llm.provider", provider=type(fast).__name__ + "-fast", model=_FAST_MODEL)
         return result
     except Exception as exc:
-        fallback = await _fallback(fast)
+        fallback = _fallback(fast)
         if fallback is None:
             raise
-        logger.warning("llm.fast_tools_failed", error=str(exc), fallback=type(fallback).__name__)
-    return await fallback.complete_with_tools(messages, system, tools, _FAST_MODEL, tokens)
+        logger.warning("llm.fast_tools_failed", error=str(exc), fallback=type(fallback).__name__, exc_info=True)
+    try:
+        return await fallback.complete_with_tools(messages, system, tools, _FAST_MODEL, tokens)
+    except Exception as exc:
+        logger.error("llm.fast_tools_fallback_failed", error=str(exc), fallback=type(fallback).__name__, exc_info=True)
+        raise

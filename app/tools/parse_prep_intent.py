@@ -18,20 +18,20 @@ _VALID_ROUNDS = set(get_args(RoundType))
 # Python-side alias map — applied after LLM parse as a reliable fallback.
 # Keys are lowercase substrings; value is the canonical round type.
 _ROUND_ALIAS_MAP: list[tuple[str, str]] = [
-    ("coding ability and problem solving", "dsa"),
-    ("coding ability", "dsa"),
-    ("problem solving", "dsa"),
-    ("data structures", "dsa"),
-    ("algorithms", "dsa"),
-    ("technical screen", "dsa"),
-    ("coding round", "dsa"),
-    ("coding interview", "dsa"),
-    ("leetcode", "dsa"),
-    ("low level design", "lld"),
-    ("object oriented design", "lld"),
-    ("oo design", "lld"),
-    ("machine coding", "lld"),
-    ("object design", "lld"),
+    ("coding ability and problem solving", "DSA"),
+    ("coding ability", "DSA"),
+    ("problem solving", "DSA"),
+    ("data structures", "DSA"),
+    ("algorithms", "DSA"),
+    ("technical screen", "DSA"),
+    ("coding round", "DSA"),
+    ("coding interview", "DSA"),
+    ("leetcode", "DSA"),
+    ("low level design", "LLD"),
+    ("object oriented design", "LLD"),
+    ("oo design", "LLD"),
+    ("machine coding", "LLD"),
+    ("object design", "LLD"),
     ("system design", "sysdesign"),
     ("high level design", "sysdesign"),
     ("architecture round", "sysdesign"),
@@ -71,17 +71,17 @@ Extract interview prep details from the user message. Return ONLY valid JSON:
   "round_labels": [<original round names as written by user> or null]
 }
 
-Round mapping — map any mention to the canonical type:
-- dsa: "dsa", "coding", "algorithms", "data structures", "problem solving",
-        "coding ability", "coding ability and problem solving", "leetcode",
-        "technical screen", "coding round", "coding interview"
-- lld: "lld", "low level design", "object oriented design", "oo design",
-        "machine coding", "object design"
-- sysdesign: "sysdesign", "system design", "hld", "high level design",
-              "architecture", "design round"
-- behavioral: "behavioral", "behavioural", "values", "hr round", "culture fit",
-               "people skills", "bar raiser"
-- hiring_manager: "hiring manager", "hm round", "manager round", "leadership round"
+Round mapping — map any mention to the canonical type (use exact strings below):
+- "DSA": "coding", "algorithms", "data structures", "problem solving",
+         "coding ability", "coding ability and problem solving", "leetcode",
+         "technical screen", "coding round", "coding interview"
+- "LLD": "low level design", "object oriented design", "oo design",
+         "machine coding", "object design"
+- "sysdesign": "system design", "hld", "high level design",
+               "architecture", "design round"
+- "behavioral": "behavioural", "values", "hr round", "culture fit",
+                "people skills", "bar raiser"
+- "hiring_manager": "hiring manager", "hm round", "manager round", "leadership round"
 
 Rules:
 - company: proper noun, first clear entity mentioned
@@ -164,6 +164,11 @@ async def parse_prep_intent(message: str) -> PrepIntent:
             messages=[{"role": "user", "content": message}],
             system=system,
         )
+    except Exception as exc:
+        logger.warning("parse_prep_intent.llm_failed", error=str(exc), exc_info=True)
+        return PrepIntent()
+
+    try:
         data = json.loads(strip_fences(raw))
         rounds = data.get("rounds")
         round_labels = data.get("round_labels") or None
@@ -176,7 +181,6 @@ async def parse_prep_intent(message: str) -> PrepIntent:
         # Also catches cases where the user typed the label directly in the message
         if not rounds:
             labels_to_map = round_labels or []
-            # Also try mapping raw words from the original message
             mapped = [_map_label_to_round(l) for l in labels_to_map]
             if not any(mapped):
                 mapped = [_map_label_to_round(message)]
@@ -191,5 +195,5 @@ async def parse_prep_intent(message: str) -> PrepIntent:
             round_labels=round_labels,
         )
     except Exception as exc:
-        logger.warning("parse_prep_intent.failed", error=str(exc), message=message, exc_info=True)
+        logger.warning("parse_prep_intent.parse_failed", error=str(exc), raw=raw[:200], exc_info=True)
         return PrepIntent()

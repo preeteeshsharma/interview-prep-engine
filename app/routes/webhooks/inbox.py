@@ -20,6 +20,8 @@ from app.tools.generate_plan import generate_plan
 router = APIRouter()
 logger = get_logger(__name__)
 
+_background_tasks: set[asyncio.Task] = set()
+
 _PARSE_SYSTEM = """Extract the company name and role from a forwarded interview invite email.
 Return ONLY a JSON object: {"company": "...", "role": "..."}
 If you cannot determine one of the values, use "Unknown".
@@ -153,6 +155,8 @@ async def inbox_webhook(request: Request) -> dict[str, str]:
     )
     logger.info("mailgun.inbound.received", sender=payload.sender, subject=payload.subject)
 
-    asyncio.create_task(_bg_pipeline(payload))
+    _task = asyncio.create_task(_bg_pipeline(payload))
+    _background_tasks.add(_task)
+    _task.add_done_callback(_background_tasks.discard)
 
     return {"status": "queued"}

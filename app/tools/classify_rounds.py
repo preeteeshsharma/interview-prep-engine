@@ -44,11 +44,16 @@ _VALID: set[str] = set(get_args(RoundType))
 
 async def classify_rounds(jd_text: str) -> list[str]:
     """Return a list of RoundType strings extracted from a job description."""
-    raw = await complete(
-        messages=[{"role": "user", "content": f"Job description:\n\n{jd_text}"}],
-        system=_SYSTEM,
-        max_tokens=128,
-    )
+    try:
+        raw = await complete(
+            messages=[{"role": "user", "content": f"Job description:\n\n{jd_text}"}],
+            system=_SYSTEM,
+            max_tokens=128,
+        )
+    except Exception as exc:
+        logger.warning("classify_rounds.llm_failed", error=str(exc), exc_info=True)
+        return ["unknown"]
+
     try:
         parsed = json.loads(raw.strip())
         if not isinstance(parsed, list):
