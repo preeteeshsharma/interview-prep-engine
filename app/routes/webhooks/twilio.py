@@ -107,42 +107,55 @@ def _parse_intent(body: str) -> tuple[str, list[str]]:
 
 async def _handle_prep(sender: str, args: list[str]) -> str:
     """Parse prep intent from args, ask for missing fields, or generate plan."""
-    raw_message = " ".join(args) if args else ""
+    refresh = any(a.lower() == "refresh" for a in args)
+    raw_message = " ".join(a for a in args if a.lower() != "refresh") if args else ""
     if not raw_message:
         return (
             "Tell me about your interview:\n"
             "  e.g. prep Zapier senior backend, june 15, dsa lld\n"
-            "  or just: prep Google"
+            "  or just: prep Google june 15"
         )
 
     intent = await parse_prep_intent(raw_message)
 
     gaps = intent.missing()
     if gaps:
-        # Save partial intent so the follow-up can merge into it.
+        # Save partial intent (with refresh flag) so the follow-up can merge into it.
+        d = intent.to_dict()
+        if refresh:
+            d["_refresh"] = True
         async with async_session_factory() as session:
-            await WaWindowRepository(session).set_pending_prep(sender, intent.to_dict())
+            await WaWindowRepository(session).set_pending_prep(sender, d)
         gap_str = "\n  • ".join(gaps)
-        return f"Got it. Still need:\n  • {gap_str}\n\nReply with the missing details (I'll use defaults if you skip)."
+        return f"Got it. Still need:\n  • {gap_str}\n\nReply with the missing details."
 
-    return await _execute_prep(sender, intent)
+    return await _execute_prep(sender, intent, refresh=refresh)
 
 
 async def _handle_prep_followup(sender: str, pending: dict, body: str) -> str:
-    """Merge follow-up message into pending intent, then proceed (with defaults)."""
+    """Merge follow-up message into pending intent, then proceed."""
+    refresh = pending.pop("_refresh", False)
     existing = PrepIntent.from_dict(pending)
     new_parse = await parse_prep_intent(body)
     merged = existing.merge(new_parse)
 
+    # Date is mandatory — ask again if still missing after merge.
+    if not merged.interview_date:
+        d = merged.to_dict()
+        if refresh:
+            d["_refresh"] = True
+        async with async_session_factory() as session:
+            await WaWindowRepository(session).set_pending_prep(sender, d)
+        return "Interview date is required. Reply with the date (e.g. june 15)."
+
     async with async_session_factory() as session:
         await WaWindowRepository(session).clear_pending_prep(sender)
 
-    # Apply defaults for anything still missing — never ask twice.
     final = merged.with_defaults()
-    return await _execute_prep(sender, final)
+    return await _execute_prep(sender, final, refresh=refresh)
 
 
-async def _execute_prep(sender: str, intent: PrepIntent) -> str:
+async def _execute_prep(sender: str, intent: PrepIntent, refresh: bool = False) -> str:
     """Generate research + plan for a fully-resolved PrepIntent.
 
     For multi-round prep (e.g. 'prep google dsa lld'), runs research once and
@@ -154,14 +167,17 @@ async def _execute_prep(sender: str, intent: PrepIntent) -> str:
     company = final.company or "Unknown"
     role = final.role
     round_types = final.rounds  # list, e.g. ["DSA", "LLD"]
+
+    if not final.interview_date:
+        return "Interview date is required. Try: prep google dsa june 15"
+
     scheduled_for = None
-    if final.interview_date:
-        try:
-            scheduled_for = _datetime.strptime(final.interview_date, "%Y-%m-%d").replace(
-                tzinfo=_tz.utc
-            )
-        except ValueError:
-            pass
+    try:
+        scheduled_for = _datetime.strptime(final.interview_date, "%Y-%m-%d").replace(
+            tzinfo=_tz.utc
+        )
+    except ValueError:
+        return f"Couldn't parse date '{final.interview_date}'. Try: june 15 or 2026-06-15"
 
     round_label = (final.round_labels or [None])[0]
     single_round_type = round_types[0] if len(round_types) == 1 else None
@@ -176,15 +192,15 @@ async def _execute_prep(sender: str, intent: PrepIntent) -> str:
             async with async_session_factory() as session:
                 pending = await PrepPlanRepository(session).get_pending(match.id)
             date_changed = (
-                final.interview_date
-                and match.scheduled_for
+                match.scheduled_for
                 and match.scheduled_for.date().isoformat() != final.interview_date
             )
-            if pending and not date_changed:
+            if pending and not date_changed and not refresh:
                 if len(round_types) == 1:
                     return (
                         f"Active plan for {match.company} ({rt}) already exists.\n"
-                        f"Send 'done {company.lower()} {rt.lower()} easy/medium/hard' to complete it."
+                        f"Send 'done {company.lower()} {rt.lower()} easy/medium/hard' to complete it, "
+                        f"or 'prep {company.lower()} {rt.lower()} {final.interview_date} refresh' to regenerate."
                     )
                 continue  # skip this round in multi-round; others may still need plans
             interviews_to_run.append((match, rt))

@@ -69,7 +69,7 @@ async def test_prep_idempotency_skips_llm_when_active_plan_exists():
     mock_plan_repo = AsyncMock()
     mock_plan_repo.get_pending.return_value = mock_pending
 
-    intent = PrepIntent(company="Google", role="L5 SWE", rounds=["DSA"], interview_date=None)
+    intent = PrepIntent(company="Google", role="L5 SWE", rounds=["DSA"], interview_date="2026-06-15")
 
     with patch("app.routes.webhooks.twilio.async_session_factory") as mock_factory, \
          patch("app.routes.webhooks.twilio.InterviewRepository", return_value=mock_interview_repo), \
