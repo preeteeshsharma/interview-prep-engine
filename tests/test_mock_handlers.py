@@ -57,14 +57,14 @@ async def test_prep_idempotency_skips_llm_when_active_plan_exists():
     mock_interview.id = 1
     mock_interview.company = "Google"
     mock_interview.role = "L5 SWE"
-    mock_interview.round_types = ["DSA"]
+    mock_interview.round_type = "DSA"
     mock_interview.scheduled_for = None
 
     mock_pending = MagicMock()
     mock_pending.id = 10
 
     mock_interview_repo = AsyncMock()
-    mock_interview_repo.list_active.return_value = [mock_interview]
+    mock_interview_repo.find_active_by_company_round.return_value = mock_interview
 
     mock_plan_repo = AsyncMock()
     mock_plan_repo.get_pending.return_value = mock_pending
@@ -96,14 +96,14 @@ async def test_prep_reruns_llm_when_date_changes():
     mock_interview.id = 1
     mock_interview.company = "Google"
     mock_interview.role = "L5 SWE"
-    mock_interview.round_types = ["DSA"]
+    mock_interview.round_type = "DSA"
     mock_interview.scheduled_for = datetime(2026, 5, 10, tzinfo=timezone.utc)  # old date
 
     mock_pending = MagicMock()
     mock_pending.id = 10
 
     mock_interview_repo = AsyncMock()
-    mock_interview_repo.list_active.return_value = [mock_interview]
+    mock_interview_repo.find_active_by_company_round.return_value = mock_interview
 
     mock_plan_repo = AsyncMock()
     mock_plan_repo.get_pending.return_value = mock_pending
@@ -159,6 +159,7 @@ async def test_mock_rejects_unknown_round_type():
     mock_interview.id = 1
     mock_interview.company = "Stripe"
     mock_interview.role = "Backend Engineer"
+    mock_interview.round_type = "knitting"  # so _resolve_interview finds it
 
     with patch("app.routes.webhooks.twilio.async_session_factory") as mock_factory:
         mock_session = AsyncMock()
@@ -248,13 +249,13 @@ async def test_done_disambiguation_shows_round_types():
     interview1.id = 1
     interview1.company = "Google"
     interview1.role = "L5 SWE"
-    interview1.round_types = ["DSA", "LLD"]
+    interview1.round_type = "DSA"
 
     interview2 = MagicMock()
     interview2.id = 2
     interview2.company = "Stripe"
     interview2.role = "Senior Engineer"
-    interview2.round_types = ["sysdesign"]
+    interview2.round_type = "sysdesign"
 
     with patch("app.routes.webhooks.twilio.async_session_factory") as mock_factory, \
          patch("app.routes.webhooks.twilio.WaWindowRepository") as mock_wa_cls:
@@ -320,7 +321,7 @@ async def test_status_lists_active_interviews():
     mock_interview = MagicMock()
     mock_interview.company = "Zapier"
     mock_interview.role = "Backend Engineer"
-    mock_interview.round_types = ["DSA", "behavioral"]
+    mock_interview.round_type = "DSA"
     mock_interview.scheduled_for = None
 
     with patch("app.routes.webhooks.twilio.async_session_factory") as mock_factory:

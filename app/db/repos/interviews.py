@@ -1,6 +1,5 @@
 from datetime import datetime
-
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Interview
@@ -14,13 +13,13 @@ class InterviewRepository:
         self,
         company: str,
         role: str,
-        round_types: list[str],
+        round_type: str | None = None,
         scheduled_for: datetime | None = None,
     ) -> Interview:
         interview = Interview(
             company=company,
             role=role,
-            round_types=round_types,
+            round_type=round_type,
             scheduled_for=scheduled_for,
             status="active",
         )
@@ -28,6 +27,26 @@ class InterviewRepository:
         await self._session.commit()
         await self._session.refresh(interview)
         return interview
+
+    async def find_active_by_company_round(
+        self, company: str, round_type: str | None
+    ) -> Interview | None:
+        """Return the most recent active interview for this company+round combination."""
+        conditions = [
+            Interview.status == "active",
+            func.lower(Interview.company) == company.lower(),
+        ]
+        if round_type is not None:
+            conditions.append(Interview.round_type == round_type)
+        else:
+            conditions.append(Interview.round_type.is_(None))
+        result = await self._session.execute(
+            select(Interview)
+            .where(*conditions)
+            .order_by(Interview.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def list_active(self, user_email: str | None = None) -> list[Interview]:
         # user_email filter added in V2 after adding user_email FK column + migration.

@@ -102,28 +102,37 @@ async def _run_pipeline(payload: MailgunInbound) -> None:
     rounds = await classify_rounds(jd_text)
     logger.info("inbox.classified", rounds=rounds)
 
-    async with async_session_factory() as session:
-        interview = await InterviewRepository(session).create(
-            company=company,
-            role=role,
-            round_types=rounds,
-        )
-        interview_id = interview.id
+    # Create one Interview per round — dedup by company+round so forwarding the
+    # same invite twice is idempotent.
+    interviews: list = []
+    for rt in rounds:
+        async with async_session_factory() as session:
+            existing = await InterviewRepository(session).find_active_by_company_round(company, rt)
+            if existing:
+                interviews.append(existing)
+            else:
+                created = await InterviewRepository(session).create(
+                    company=company, role=role, round_type=rt,
+                )
+                interviews.append(created)
+
+    if not interviews:
+        return
 
     plan_md = await generate_plan(
-        interview_id=interview_id,
+        interview_id=interviews[0].id,
         company=company,
         role=role,
         round_types=rounds,
     )
 
-    vault_path_str = f"plans/{company.lower().replace(' ', '-')}-{interview_id}.md"
+    vault_path_str = f"plans/{company.lower().replace(' ', '-')}-{interviews[0].id}.md"
     committed_path: str | None = None
     try:
         sha = await commit_file(
             path=vault_path_str,
             content=plan_md,
-            message=f"prep: {company} — {role} (interview #{interview_id})",
+            message=f"prep: {company} — {role}",
             github_token=ctx.github_token,
             vault_repo=ctx.vault_repo,
         )
@@ -132,13 +141,15 @@ async def _run_pipeline(payload: MailgunInbound) -> None:
     except Exception as exc:
         logger.warning("inbox.vault_commit_failed", path=vault_path_str, error=str(exc), exc_info=True)
 
-    async with async_session_factory() as session:
-        await PrepPlanRepository(session).create(
-            interview_id=interview_id,
-            time_budget_min=120,
-            vault_path=committed_path,
-            drill_label=_first_heading(plan_md),
-        )
+    drill_label = _first_heading(plan_md)
+    for interview in interviews:
+        async with async_session_factory() as session:
+            await PrepPlanRepository(session).create(
+                interview_id=interview.id,
+                time_budget_min=120,
+                vault_path=committed_path,
+                drill_label=drill_label,
+            )
 
 
 async def _bg_pipeline(payload: MailgunInbound) -> None:

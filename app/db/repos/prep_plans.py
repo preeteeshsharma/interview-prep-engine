@@ -17,7 +17,7 @@ class PrepPlanRepository:
         vault_path: str | None = None,
         drill_label: str | None = None,
     ) -> PrepPlan:
-        # Supersede any existing pending plans so done always targets exactly one active plan.
+        # Supersede any existing pending plans for this interview — one active plan per interview.
         await self._session.execute(
             update(PrepPlan)
             .where(

@@ -68,7 +68,7 @@ async def run_morning_drill() -> None:
                     interview_id=interview.id,
                     company=interview.company,
                     role=interview.role,
-                    round_types=interview.round_types,
+                    round_type=interview.round_type,
                     recipient=recipient,
                     today=today,
                     github_token=ctx.github_token,
@@ -90,12 +90,13 @@ async def _process_interview(
     interview_id: int,
     company: str,
     role: str,
-    round_types: list[str],
+    round_type: str | None,
     recipient: str,
     today: str,
     github_token: str | None = None,
     vault_repo: str | None = None,
 ) -> None:
+    round_types = [round_type] if round_type else []
     # Step 1: mark yesterday's uncompleted plan as skipped.
     await _mark_yesterday_skipped(interview_id)
 
@@ -159,7 +160,7 @@ async def _process_interview(
 
     preview = plan_md[:400].rstrip() + "…"
     message = (
-        f"Good morning! Today's prep — {company} ({', '.join(round_types)}):\n\n"
+        f"Good morning! Today's prep — {company} ({round_type or 'general'}):\n\n"
         f"{preview}\n\n"
         "Reply done easy / done medium / done hard when finished."
     )

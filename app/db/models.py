@@ -16,7 +16,7 @@ class Interview(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     company: Mapped[str]
     role: Mapped[str]
-    round_types: Mapped[list[str]] = mapped_column(JSON)
+    round_type: Mapped[str | None] = mapped_column(nullable=True)  # DSA/LLD/… or None for multi-round
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(default="active")  # active | done | cancelled
     created_at: Mapped[datetime] = mapped_column(

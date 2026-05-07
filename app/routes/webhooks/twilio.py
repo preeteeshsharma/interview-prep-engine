@@ -29,7 +29,7 @@ from app.agents.tutor import Tutor
 from app.integrations.github_client import read_file
 from app.lib.user_context import get_user_context
 from app.tools.generate_plan import generate_plan
-from app.tools.parse_prep_intent import PrepIntent, parse_prep_intent
+from app.tools.parse_prep_intent import PrepIntent, _map_label_to_round, parse_prep_intent
 from app.tools.record_completion import record_completion
 from app.tools.research_company import research_company
 
@@ -143,13 +143,17 @@ async def _handle_prep_followup(sender: str, pending: dict, body: str) -> str:
 
 
 async def _execute_prep(sender: str, intent: PrepIntent) -> str:
-    """Generate research + plan for a fully-resolved PrepIntent."""
+    """Generate research + plan for a fully-resolved PrepIntent.
+
+    For multi-round prep (e.g. 'prep google dsa lld'), runs research once and
+    creates one Interview + PrepPlan per round, all sharing the same vault content.
+    """
     from datetime import datetime as _datetime, timezone as _tz
 
     final = intent.with_defaults()
     company = final.company or "Unknown"
     role = final.role
-    round_types = final.rounds
+    round_types = final.rounds  # list, e.g. ["DSA", "LLD"]
     scheduled_for = None
     if final.interview_date:
         try:
@@ -159,75 +163,69 @@ async def _execute_prep(sender: str, intent: PrepIntent) -> str:
         except ValueError:
             pass
 
-    async with async_session_factory() as session:
-        interviews = await InterviewRepository(session).list_active()
-        match = next((i for i in interviews if i.company.lower() == company.lower()), None)
-
     round_label = (final.round_labels or [None])[0]
-    # Use questions mode when there's exactly one round — gives targeted Q&A research.
     single_round_type = round_types[0] if len(round_types) == 1 else None
 
-    if match:
-        # Idempotency: skip LLM if there's already a pending plan and the date hasn't changed.
+    # Find or create one Interview per round, check idempotency per round.
+    interviews_to_run: list[tuple] = []  # (interview, round_type)
+    for rt in round_types:
         async with async_session_factory() as session:
-            pending_plan = await PrepPlanRepository(session).get_pending(match.id)
-        date_changed = (
-            final.interview_date
-            and match.scheduled_for
-            and match.scheduled_for.date().isoformat() != final.interview_date
-        )
-        if pending_plan and not date_changed:
-            return (
-                f"Active plan for {match.company} already exists.\n"
-                f"Send 'done easy/medium/hard' to complete it, or add 'refresh' to regenerate."
+            match = await InterviewRepository(session).find_active_by_company_round(company, rt)
+
+        if match:
+            async with async_session_factory() as session:
+                pending = await PrepPlanRepository(session).get_pending(match.id)
+            date_changed = (
+                final.interview_date
+                and match.scheduled_for
+                and match.scheduled_for.date().isoformat() != final.interview_date
             )
+            if pending and not date_changed:
+                if len(round_types) == 1:
+                    return (
+                        f"Active plan for {match.company} ({rt}) already exists.\n"
+                        f"Send 'done {company.lower()} {rt.lower()} easy/medium/hard' to complete it."
+                    )
+                continue  # skip this round in multi-round; others may still need plans
+            interviews_to_run.append((match, rt))
+        else:
+            async with async_session_factory() as session:
+                new_interview = await InterviewRepository(session).create(
+                    company=company, role=role, round_type=rt, scheduled_for=scheduled_for,
+                )
+            interviews_to_run.append((new_interview, rt))
 
-        effective_role = match.role if match.role != "Unknown" else role
-        rounds = match.round_types
-        research = await run_research(match.company, effective_role, round_type=single_round_type, round_label=round_label)
-        plan_md = await generate_plan(
-            interview_id=match.id,
-            company=match.company,
-            role=effective_role,
-            round_types=rounds,
-            research_context=research,
-        )
-        vault_path = await _commit_plan_to_vault(match.id, match.company, plan_md, research, round_label=round_label or single_round_type)
-        async with async_session_factory() as session:
-            await PrepPlanRepository(session).create(
-                interview_id=match.id,
-                time_budget_min=120,
-                vault_path=vault_path,
-                drill_label=_first_heading(plan_md),
-            )
-        return f"Researching & planning {match.company} ({effective_role}):\n\n{plan_md[:1200]}…\n\n(Full plan + sources in prep-vault)"
+    if not interviews_to_run:
+        return f"All rounds for {company} already have active plans. Send 'done' when finished."
 
-    async with async_session_factory() as session:
-        interview = await InterviewRepository(session).create(
-            company=company,
-            role=role,
-            round_types=round_types,
-            scheduled_for=scheduled_for,
-        )
-
-    research = await run_research(company, role, round_type=single_round_type, round_label=round_label)
+    # Research once for the company (covers all rounds).
+    effective_role = interviews_to_run[0][0].role if interviews_to_run[0][0].role != "Unknown" else role
+    research = await run_research(company, effective_role, round_type=single_round_type, round_label=round_label)
     plan_md = await generate_plan(
-        interview_id=interview.id,
+        interview_id=interviews_to_run[0][0].id,
         company=company,
-        role=role,
+        role=effective_role,
         round_types=round_types,
         research_context=research,
     )
-    vault_path = await _commit_plan_to_vault(interview.id, company, plan_md, research, round_label=round_label or single_round_type)
-    async with async_session_factory() as session:
-        await PrepPlanRepository(session).create(
-            interview_id=interview.id,
-            time_budget_min=120,
-            vault_path=vault_path,
-            drill_label=_first_heading(plan_md),
-        )
+    vault_path = await _commit_plan_to_vault(
+        interviews_to_run[0][0].id, company, plan_md, research,
+        round_label=round_label or single_round_type,
+    )
+    drill_label = _first_heading(plan_md)
+
+    for interview, _ in interviews_to_run:
+        async with async_session_factory() as session:
+            await PrepPlanRepository(session).create(
+                interview_id=interview.id,
+                time_budget_min=120,
+                vault_path=vault_path,
+                drill_label=drill_label,
+            )
+
     date_str = f" on {final.interview_date}" if final.interview_date else ""
-    return f"Plan for {company} ({role}){date_str}:\n\n{plan_md[:1200]}…\n\n(Full plan + sources in prep-vault)"
+    rounds_str = " + ".join(round_types)
+    return f"Plan for {company} ({role}) — {rounds_str}{date_str}:\n\n{plan_md[:1200]}…\n\n(Full plan + sources in prep-vault)"
 
 
 async def _commit_plan_to_vault(
@@ -289,26 +287,27 @@ async def _handle_mock(sender: str, args: list[str]) -> str:
 
     # Resolve company.
     interview = None
-    if company_hint:
-        interview = next((i for i in interviews if i.company.lower() == company_hint.lower()), None)
-    if interview is None and len(interviews) == 1:
-        interview = interviews[0]
+    interview = _resolve_interview(interviews, company_hint, round_hint)
+    if interview is None and company_hint and not round_hint:
+        # Company matched but multiple rounds — pick by round_hint from the mock round
+        pass
     if interview is None:
-        # Multiple active interviews, company ambiguous — ask once.
-        options = "\n".join(f"  • {i.company} ({i.role})" for i in interviews)
+        # Multiple active interviews, ambiguous — ask once.
+        options = "\n".join(f"  • {i.company} — {i.round_type or 'general'} ({i.role})" for i in interviews)
         pending = {"_command": "mock", "round": round_hint}
         async with async_session_factory() as session:
             await WaWindowRepository(session).set_pending_prep(sender, pending)
         return f"Which interview?\n{options}\n\nReply: mock <company> <round>"
 
-    # Resolve round.
-    if not round_hint:
+    # Use the interview's own round_type if no explicit round given.
+    round_type = round_hint or (interview.round_type.lower() if interview.round_type else None)
+    if not round_type:
         pending = {"_command": "mock", "company": interview.company, "round": None}
         async with async_session_factory() as session:
             await WaWindowRepository(session).set_pending_prep(sender, pending)
         return "Which round? dsa / lld / sysdesign / behavioral"
 
-    round_type = round_hint.lower()
+    round_type = round_type.lower()
     if round_type not in _MOCK_ROUNDS:
         return f"Unknown round '{round_type}'. Use: dsa, lld, sysdesign, behavioral"
 
@@ -353,15 +352,14 @@ async def _handle_mock_followup(sender: str, pending: dict, body: str) -> str:
         await WaWindowRepository(session).clear_pending_prep(sender)
         interviews = await InterviewRepository(session).list_active()
 
-    interview = None
-    if company_hint:
-        interview = next((i for i in interviews if i.company.lower() == company_hint.lower()), None)
+    interview = _resolve_interview(interviews, company_hint, round_hint)
     if interview is None and interviews:
         interview = interviews[0]
     if interview is None:
         return "No active interviews found."
 
-    round_type = (round_hint or "behavioral").lower()
+    round_type = round_hint or (interview.round_type.lower() if interview.round_type else "behavioral")
+    round_type = round_type.lower()
     if round_type not in _MOCK_ROUNDS:
         round_type = "behavioral"
 
@@ -369,13 +367,13 @@ async def _handle_mock_followup(sender: str, pending: dict, body: str) -> str:
 
 
 async def _handle_done(sender: str, args: list[str]) -> str:
-    # Extract rating — must be present.
     rating = next((a.lower() for a in args if a.lower() in {"easy", "medium", "hard"}), None)
     if not rating:
-        return "Usage: done easy / done medium / done hard\n  e.g. done google easy"
+        return "Usage: done easy / done medium / done hard\n  e.g. done google dsa easy"
 
-    # Extract company hint from remaining args.
-    remaining = [a for a in args if a.lower() not in {"easy", "medium", "hard"}]
+    round_hint = next((_map_label_to_round(a) for a in args if _map_label_to_round(a)), None)
+    remaining = [a for a in args
+                 if a.lower() not in {"easy", "medium", "hard"} and not _map_label_to_round(a)]
     company_hint = " ".join(remaining).strip() or None
 
     async with async_session_factory() as session:
@@ -384,22 +382,32 @@ async def _handle_done(sender: str, args: list[str]) -> str:
     if not interviews:
         return "No active interviews found. Forward an invite or run: prep <company>"
 
-    # Resolve interview.
-    interview = None
-    if company_hint:
-        interview = next((i for i in interviews if i.company.lower() == company_hint.lower()), None)
-    if interview is None and len(interviews) == 1:
-        interview = interviews[0]
+    # Try to resolve to a single interview using company + round hints.
+    interview = _resolve_interview(interviews, company_hint, round_hint)
     if interview is None:
         options = "\n".join(
-            f"  • {i.company} — {', '.join(i.round_types)} ({i.role})" for i in interviews
+            f"  • {i.company} — {i.round_type or 'general'} ({i.role})" for i in interviews
         )
-        pending = {"_command": "done", "rating": rating}
+        pending = {"_command": "done", "rating": rating, "round": round_hint}
         async with async_session_factory() as session:
             await WaWindowRepository(session).set_pending_prep(sender, pending)
-        return f"Which interview?\n{options}\n\nReply: done <company> {rating}"
+        return f"Which interview?\n{options}\n\nReply: done <company> [round] {rating}"
 
     return await _execute_done(interview, rating)
+
+
+def _resolve_interview(interviews: list, company_hint: str | None, round_hint: str | None):
+    """Return a single interview from the list given optional company and round hints."""
+    candidates = interviews
+    if company_hint:
+        candidates = [i for i in candidates if i.company.lower() == company_hint.lower()]
+    if round_hint:
+        candidates = [i for i in candidates if i.round_type == round_hint]
+    if len(candidates) == 1:
+        return candidates[0]
+    if not company_hint and not round_hint and len(interviews) == 1:
+        return interviews[0]
+    return None
 
 
 async def _execute_done(interview, rating: str) -> str:
@@ -407,7 +415,12 @@ async def _execute_done(interview, rating: str) -> str:
         plan = await PrepPlanRepository(session).get_pending(interview.id)
 
     if not plan:
-        return f"No pending drill for {interview.company}. Get a plan first: prep {interview.company}"
+        rt = f" {interview.round_type}" if interview.round_type else ""
+        return (
+            f"No pending drill for {interview.company}{rt}. "
+            f"Get a plan first: prep {interview.company.lower()}"
+            + (f" {interview.round_type.lower()}" if interview.round_type else "")
+        )
 
     return await record_completion(plan.id, rating)
 
@@ -421,13 +434,14 @@ async def _handle_done_followup(sender: str, pending: dict, body: str) -> str:
     if not rating:
         rating = next((w.lower() for w in body.split() if w.lower() in {"easy", "medium", "hard"}), "medium")
 
-    # Remove rating word from company hint if present.
-    words = [w for w in body.split() if w.lower() not in {"easy", "medium", "hard"}]
-    company_hint = " ".join(words).strip()
+    round_hint = pending.get("round") or next(
+        (_map_label_to_round(w) for w in body.split() if _map_label_to_round(w)), None
+    )
+    words = [w for w in body.split()
+             if w.lower() not in {"easy", "medium", "hard"} and not _map_label_to_round(w)]
+    company_hint = " ".join(words).strip() or None
 
-    interview = None
-    if company_hint:
-        interview = next((i for i in interviews if i.company.lower() == company_hint.lower()), None)
+    interview = _resolve_interview(interviews, company_hint, round_hint)
     if interview is None and interviews:
         interview = interviews[0]
     if interview is None:
@@ -445,9 +459,9 @@ async def _handle_status(sender: str) -> str:
 
     lines = ["Active interviews:"]
     for i in interviews:
-        rounds = ", ".join(i.round_types)
+        round_str = i.round_type or "general"
         scheduled = i.scheduled_for.strftime("%b %d") if i.scheduled_for else "TBD"
-        lines.append(f"  • {i.company} — {i.role} | {rounds} | {scheduled}")
+        lines.append(f"  • {i.company} — {i.role} | {round_str} | {scheduled}")
     return "\n".join(lines)
 
 
