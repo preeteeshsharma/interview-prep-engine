@@ -11,4 +11,4 @@ os.environ.setdefault("MAILGUN_SIGNING_KEY", "test_signing_key")
 os.environ.setdefault("GITHUB_TOKEN", "ghp_test")
 os.environ.setdefault("GITHUB_VAULT_REPO", "test/prep-vault")
 os.environ.setdefault("OWNER_EMAIL", "test@example.com")
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")  # tests use SQLite in-memory regardless of prod DB

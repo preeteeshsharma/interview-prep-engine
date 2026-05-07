@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     github_token: str
     github_vault_repo: str
     owner_email: str = "owner@example.com"  # V1 single-user identity — replaced by User table in V2
-    database_url: str = "sqlite+aiosqlite:///./data/app.db"
+    database_url: str = "postgresql+asyncpg://user:password@host:5432/dbname"
     env: str = "development"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
