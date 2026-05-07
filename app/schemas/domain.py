@@ -11,17 +11,13 @@ class InterviewDTO(BaseModel):
     id: int
     company: str
     role: str
-    round_types: list[RoundType]
+    round_type: str | None
     scheduled_for: datetime | None
-    status: str
-    created_at: datetime
 
 
 class PrepPlanDTO(BaseModel):
     id: int
     interview_id: int
-    plan_md: str
-    time_budget_min: int
     generated_at: datetime
     completed_at: datetime | None
     self_rating: Rating | None

@@ -148,7 +148,6 @@ async def _process_interview(
     async with async_session_factory() as session:
         plan = await PrepPlanRepository(session).create(
             interview_id=interview_id,
-            time_budget_min=120,
             vault_path=committed_path,
             drill_label=_first_heading(plan_md),
         )
@@ -188,7 +187,6 @@ async def _process_interview(
         async with async_session_factory() as session:
             await OutboundIdempotencyRepository(session).record(
                 key=idempotency_key,
-                message_sid=sid or "send_failed",
                 status="sent" if sid else "send_failed",
             )
     except Exception as exc:

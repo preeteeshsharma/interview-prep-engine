@@ -101,7 +101,6 @@ async def generate_plan(
     company: str,
     role: str,
     round_types: list[str],
-    time_budget_min: int = 120,
     weak_patterns: list[str] | None = None,
     exclude_recent: list[str] | None = None,
     days_until_interview: int = 7,
@@ -130,7 +129,6 @@ async def generate_plan(
 Company: {company}
 Role: {role}
 Round types: {", ".join(round_types)}
-Total time budget: {time_budget_min} min
 Days until interview: {days_until_interview} (interview date: {interview_date})
 Today: {today}
 

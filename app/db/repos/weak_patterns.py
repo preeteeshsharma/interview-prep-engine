@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,31 +8,17 @@ class WeakPatternRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def upsert(
-        self,
-        pattern: str,
-        weight_bump: float,
-        session_id: int | None = None,
-    ) -> WeakPattern:
+    async def upsert(self, pattern: str, weight_bump: float, session_id: int | None = None) -> WeakPattern:
         result = await self._session.execute(
             select(WeakPattern).where(WeakPattern.pattern == pattern)
         )
         existing = result.scalar_one_or_none()
-
         if existing is not None:
             existing.weight += weight_bump
-            existing.last_seen_at = datetime.now(timezone.utc)
-            existing.source_session_id = session_id
             await self._session.commit()
             await self._session.refresh(existing)
             return existing
-
-        wp = WeakPattern(
-            pattern=pattern,
-            weight=weight_bump,
-            last_seen_at=datetime.now(timezone.utc),
-            source_session_id=session_id,
-        )
+        wp = WeakPattern(pattern=pattern, weight=weight_bump)
         self._session.add(wp)
         await self._session.commit()
         await self._session.refresh(wp)

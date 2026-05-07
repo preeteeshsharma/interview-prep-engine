@@ -146,7 +146,7 @@ async def _run_pipeline(payload: MailgunInbound) -> None:
         async with async_session_factory() as session:
             await PrepPlanRepository(session).create(
                 interview_id=interview.id,
-                time_budget_min=120,
+
                 vault_path=committed_path,
                 drill_label=drill_label,
             )

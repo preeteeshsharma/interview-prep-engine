@@ -19,7 +19,7 @@ async def test_create_executes_skip_update_before_insert():
     mock_session.commit = AsyncMock()
     mock_session.refresh = AsyncMock()
 
-    await PrepPlanRepository(mock_session).create(interview_id=1, time_budget_min=120)
+    await PrepPlanRepository(mock_session).create(interview_id=1)
 
     # One UPDATE statement (the skip) must have fired.
     assert len(executed) == 1
@@ -39,7 +39,7 @@ async def test_create_new_plan_is_not_skipped():
     mock_session.commit = AsyncMock()
     mock_session.refresh = AsyncMock()
 
-    await PrepPlanRepository(mock_session).create(interview_id=5, time_budget_min=60)
+    await PrepPlanRepository(mock_session).create(interview_id=5)
 
     assert not added[0].skipped  # None (not yet committed) is falsy — new plan is not skipped
     assert added[0].interview_id == 5
@@ -58,7 +58,6 @@ async def test_create_stores_vault_path_and_drill_label():
 
     await PrepPlanRepository(mock_session).create(
         interview_id=3,
-        time_budget_min=120,
         vault_path="google/dsa/1778165199-plan.md",
         drill_label="Two Pointers",
     )

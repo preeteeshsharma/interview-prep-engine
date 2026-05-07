@@ -21,7 +21,6 @@ class InterviewRepository:
             role=role,
             round_type=round_type,
             scheduled_for=scheduled_for,
-            status="active",
         )
         self._session.add(interview)
         await self._session.commit()
@@ -31,27 +30,18 @@ class InterviewRepository:
     async def find_active_by_company_round(
         self, company: str, round_type: str | None
     ) -> Interview | None:
-        """Return the most recent active interview for this company+round combination."""
-        conditions = [
-            Interview.status == "active",
-            func.lower(Interview.company) == company.lower(),
-        ]
+        conditions = [func.lower(Interview.company) == company.lower()]
         if round_type is not None:
             conditions.append(Interview.round_type == round_type)
         else:
             conditions.append(Interview.round_type.is_(None))
         result = await self._session.execute(
-            select(Interview)
-            .where(*conditions)
-            .order_by(Interview.created_at.desc())
-            .limit(1)
+            select(Interview).where(*conditions).order_by(Interview.id.desc()).limit(1)
         )
         return result.scalar_one_or_none()
 
-    async def list_active(self, user_email: str | None = None) -> list[Interview]:
-        # user_email filter added in V2 after adding user_email FK column + migration.
-        query = select(Interview).where(Interview.status == "active")
-        result = await self._session.execute(query)
+    async def list_active(self) -> list[Interview]:
+        result = await self._session.execute(select(Interview))
         return list(result.scalars().all())
 
     async def get(self, id: int) -> Interview | None:

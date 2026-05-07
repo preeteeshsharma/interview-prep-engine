@@ -13,7 +13,6 @@ class PrepPlanRepository:
     async def create(
         self,
         interview_id: int,
-        time_budget_min: int,
         vault_path: str | None = None,
         drill_label: str | None = None,
     ) -> PrepPlan:
@@ -31,7 +30,6 @@ class PrepPlanRepository:
             interview_id=interview_id,
             vault_path=vault_path,
             drill_label=drill_label,
-            time_budget_min=time_budget_min,
             generated_at=datetime.now(timezone.utc),
         )
         self._session.add(plan)

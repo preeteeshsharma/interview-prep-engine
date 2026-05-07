@@ -29,15 +29,7 @@ class WaWindowRepository:
         await self._session.refresh(state)
         return state
 
-    async def record_template_sent(self, recipient_e164: str) -> WaWindowState:
-        state = await self._get_or_create(recipient_e164)
-        state.last_template_at = datetime.now(timezone.utc)
-        await self._session.commit()
-        await self._session.refresh(state)
-        return state
-
     async def is_within_window(self, recipient_e164: str) -> bool:
-        """Return True if last_inbound_at is within 24 hours."""
         result = await self._session.execute(
             select(WaWindowState).where(WaWindowState.recipient_e164 == recipient_e164)
         )
