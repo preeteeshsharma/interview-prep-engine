@@ -31,8 +31,9 @@ When a field is ambiguous (multiple active interviews, or missing company/round)
 
 **`prep`** — parses company, role, date, and rounds from free text. Runs a multi-source web search (Blind, Glassdoor, LeetCode Discuss, Reddit), generates a drill plan, and commits both to a private GitHub vault. One Interview row per `(company, round_type)` in the DB; the plan content lives in the vault.
 
-![alt text](image-1.png)
 https://github.com/preeteeshsharma/prep-vault/
+
+![alt text](image-1.png)
 
 **`study`** — Socratic tutoring session using vault context. The tutor classifies each question (LeetCode / local build / bug squash) and gives hints on demand, never full solutions.
 
