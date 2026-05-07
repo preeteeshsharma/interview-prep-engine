@@ -140,19 +140,22 @@ async def _handle_mock(sender: str, args: list[str]) -> str:
     async with async_session_factory() as session:
         interviews = await InterviewRepository(session).list_active()
 
-    interview_id = interviews[0].id if interviews else 0
+    if not interviews:
+        return "No active interview found. Forward an invite email first, or run: prep <company>"
+
+    interview = interviews[0]
 
     async with async_session_factory() as session:
         session_obj = await MockSessionRepository(session).create(
-            interview_id=interview_id,
+            interview_id=interview.id,
             round_type=round_type,
         )
         session_id = session_obj.id
 
     logger.info("mock.session.created", session_id=session_id, round_type=round_type)
 
-    company = interviews[0].company if interviews else "the company"
-    role = interviews[0].role if interviews else "Software Engineer"
+    company = interview.company
+    role = interview.role
     opening = await _orchestrator.start(session_id, round_type, company, role)
     return f"Mock started (session #{session_id}).\n\n{opening}"
 
