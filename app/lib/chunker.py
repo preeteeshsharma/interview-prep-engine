@@ -7,6 +7,10 @@ def chunk_message(text: str, limit: int = 4096) -> list[str]:
     if len(text) <= limit:
         return [text]
 
+    # Reserve space for the (N/N) prefix that will be added later.
+    # "(999/999) " = 10 chars covers up to 999 chunks.
+    effective = limit - 10
+
     lines = text.splitlines(keepends=True)
     chunks: list[str] = []
     current: list[str] = []
@@ -14,7 +18,7 @@ def chunk_message(text: str, limit: int = 4096) -> list[str]:
 
     for line in lines:
         # A single line that exceeds the limit must be split on word boundaries.
-        if len(line) > limit:
+        if len(line) > effective:
             # Flush current buffer first.
             if current:
                 chunks.append("".join(current))
@@ -27,7 +31,7 @@ def chunk_message(text: str, limit: int = 4096) -> list[str]:
             for word in words:
                 # +1 for the space we'd prepend (except for the first word).
                 sep_len = 1 if word_buf else 0
-                if word_buf_len + sep_len + len(word) > limit:
+                if word_buf_len + sep_len + len(word) > effective:
                     if word_buf:
                         chunks.append(" ".join(word_buf))
                     word_buf = [word]
@@ -40,7 +44,7 @@ def chunk_message(text: str, limit: int = 4096) -> list[str]:
                 # Try to continue with the next batch in the main loop.
                 current = [remainder]
                 current_len = len(remainder)
-        elif current_len + len(line) > limit:
+        elif current_len + len(line) > effective:
             # Current line would overflow — flush and start fresh.
             chunks.append("".join(current))
             current = [line]
