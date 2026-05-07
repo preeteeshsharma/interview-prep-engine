@@ -4,14 +4,25 @@ from github import Github
 
 from app.config import settings
 
-gh = Github(settings.github_token)
 
+async def commit_file(
+    path: str,
+    content: str,
+    message: str,
+    github_token: str | None = None,
+    vault_repo: str | None = None,
+) -> str:
+    """Upsert a file in the vault repo. Returns the commit SHA.
 
-async def commit_file(path: str, content: str, message: str) -> str:
-    """Upsert a file in the configured vault repo. Returns the commit SHA."""
+    V1: token and repo default to settings (single owner).
+    V2: pass per-user token and repo from UserContext.
+    """
+    token = github_token or settings.github_token
+    repo_name = vault_repo or settings.github_vault_repo
 
     def _commit() -> str:
-        repo = gh.get_repo(settings.github_vault_repo)
+        gh = Github(token)
+        repo = gh.get_repo(repo_name)
         try:
             existing = repo.get_contents(path)
             result = repo.update_file(
@@ -21,7 +32,6 @@ async def commit_file(path: str, content: str, message: str) -> str:
                 sha=existing.sha,
             )
         except Exception:
-            # File does not exist yet — create it.
             result = repo.create_file(
                 path=path,
                 message=message,

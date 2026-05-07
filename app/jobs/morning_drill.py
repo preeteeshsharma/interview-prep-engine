@@ -17,6 +17,7 @@ from app.integrations.twilio_client import send_whatsapp
 from app.lib.chunker import chunk_message
 from app.lib.idempotency import make_key
 from app.lib.logging import get_logger
+from app.lib.user_context import get_user_context
 from app.tools.generate_plan import generate_plan
 
 logger = get_logger(__name__)
@@ -45,6 +46,8 @@ async def run_morning_drill() -> None:
 
     from app.config import settings
     recipient = settings.twilio_to_whatsapp
+    # V2: iterate over registered users; for each get ctx = await get_user_context(user.phone)
+    ctx = await get_user_context()
 
     for interview in interviews:
         interview_id = interview.id
@@ -60,6 +63,8 @@ async def run_morning_drill() -> None:
                 round_types=round_types,
                 recipient=recipient,
                 today=today,
+                github_token=ctx.github_token,
+                vault_repo=ctx.vault_repo,
             )
         except Exception as exc:
             logger.error(
@@ -79,6 +84,8 @@ async def _process_interview(
     round_types: list[str],
     recipient: str,
     today: str,
+    github_token: str | None = None,
+    vault_repo: str | None = None,
 ) -> None:
     # Step 1: mark yesterday's uncompleted plan as skipped.
     await _mark_yesterday_skipped(interview_id)
@@ -128,6 +135,8 @@ async def _process_interview(
             path=vault_path,
             content=plan_md,
             message=f"drill: {company} — {today}",
+            github_token=github_token,
+            vault_repo=vault_repo,
         )
     except Exception as exc:
         logger.warning("morning_drill.vault_commit_failed", error=str(exc))

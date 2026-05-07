@@ -14,6 +14,7 @@ from app.db.repos.weak_patterns import WeakPatternRepository
 from app.db.session import async_session_factory
 from app.integrations.github_client import commit_file
 from app.lib.logging import get_logger
+from app.lib.user_context import get_user_context
 from app.schemas.agent_io import Critique, RubricScore
 
 logger = get_logger(__name__)
@@ -152,10 +153,14 @@ class MockOrchestrator:
         # Commit transcript + critique to prep-vault.
         vault_content = _format_vault_entry(transcript, rubric, critique)
         try:
+            # V2: pass sender_phone into end_session() and derive ctx from it.
+            ctx = await get_user_context()
             await commit_file(
                 path=f"mocks/session-{session_id}.md",
                 content=vault_content,
                 message=f"mock: session #{session_id} — {mock.round_type}",
+                github_token=ctx.github_token,
+                vault_repo=ctx.vault_repo,
             )
         except Exception as exc:
             logger.warning("orchestrator.vault_commit_failed", error=str(exc))

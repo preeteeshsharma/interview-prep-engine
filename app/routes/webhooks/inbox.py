@@ -12,6 +12,7 @@ from app.db.session import async_session_factory
 from app.integrations.anthropic_client import complete
 from app.integrations.github_client import commit_file
 from app.lib.logging import get_logger
+from app.lib.user_context import get_user_context
 from app.schemas.webhooks import MailgunInbound
 from app.tools.classify_rounds import classify_rounds
 from app.tools.generate_plan import generate_plan
@@ -51,6 +52,8 @@ def _validate_mailgun_signature(timestamp: str, token: str, signature: str) -> N
 
 async def _run_pipeline(payload: MailgunInbound) -> None:
     """Classify → create DB record → generate plan → commit to vault."""
+    # V2: pass sender email to get_user_context() for per-user GitHub config.
+    ctx = await get_user_context()
     company, role = await _parse_company_role(payload.subject, payload.body_plain)
     logger.info("inbox.parsed", company=company, role=role)
 
@@ -85,6 +88,8 @@ async def _run_pipeline(payload: MailgunInbound) -> None:
         path=vault_path,
         content=plan_md,
         message=f"prep: {company} — {role} (interview #{interview_id})",
+        github_token=ctx.github_token,
+        vault_repo=ctx.vault_repo,
     )
     logger.info("inbox.committed", path=vault_path, sha=sha)
 

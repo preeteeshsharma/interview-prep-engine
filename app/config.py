@@ -9,7 +9,8 @@ class Settings(BaseSettings):
     twilio_to_whatsapp: str  # Preeteesh's personal number
     mailgun_signing_key: str
     github_token: str
-    github_vault_repo: str  # e.g. preeteesh/prep-vault
+    github_vault_repo: str
+    owner_email: str = "owner@example.com"  # V1 single-user identity — replaced by User table in V2
     database_url: str = "sqlite+aiosqlite:///./data/app.db"
     env: str = "development"
 
