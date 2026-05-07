@@ -80,6 +80,7 @@ async def run_morning_drill() -> None:
                     interview_id=interview.id,
                     company=interview.company,
                     error=str(exc),
+                    exc_info=True,
                 )
 
     logger.info("morning_drill.done")
@@ -178,12 +179,17 @@ async def _process_interview(
     except Exception as exc:
         logger.error("morning_drill.send_failed", interview_id=interview_id, error=str(exc), exc_info=True)
 
-    # Step 7: record idempotency even if send failed — prevents duplicate sends on retry.
-    async with async_session_factory() as session:
-        await OutboundIdempotencyRepository(session).record(
-            key=idempotency_key,
-            message_sid=sid or "send_failed",
-        )
+    # Step 7: record idempotency. Use status='send_failed' so a transient send error
+    # doesn't permanently block the next cron run from retrying.
+    try:
+        async with async_session_factory() as session:
+            await OutboundIdempotencyRepository(session).record(
+                key=idempotency_key,
+                message_sid=sid or "send_failed",
+                status="sent" if sid else "send_failed",
+            )
+    except Exception as exc:
+        logger.error("morning_drill.idempotency_record_failed", key=idempotency_key, error=str(exc), exc_info=True)
 
     logger.info(
         "morning_drill.sent",

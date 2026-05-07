@@ -10,11 +10,12 @@ class OutboundIdempotencyRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def record(self, key: str, message_sid: str) -> OutboundIdempotency:
+    async def record(self, key: str, message_sid: str, status: str = "sent") -> OutboundIdempotency:
         record = OutboundIdempotency(
             idempotency_key=key,
             message_sid=message_sid,
             sent_at=datetime.now(timezone.utc),
+            status=status,
         )
         self._session.add(record)
         await self._session.commit()
@@ -22,7 +23,14 @@ class OutboundIdempotencyRepository:
         return record
 
     async def exists(self, key: str) -> bool:
+        """Return True only if a successful send was recorded (status='sent').
+
+        A 'send_failed' record does NOT block retry — the next cron run will attempt again.
+        """
         result = await self._session.execute(
-            select(OutboundIdempotency).where(OutboundIdempotency.idempotency_key == key)
+            select(OutboundIdempotency).where(
+                OutboundIdempotency.idempotency_key == key,
+                OutboundIdempotency.status == "sent",
+            )
         )
         return result.scalar_one_or_none() is not None

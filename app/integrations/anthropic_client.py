@@ -10,7 +10,7 @@ logger = get_logger(__name__)
 client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 _MAX_RETRIES = 3
-_RETRY_BASE_SECONDS = 2
+_RETRY_BACKOFF_BASE = 2
 _RETRYABLE_STATUSES = {429, 500, 502, 529}
 
 
@@ -38,7 +38,7 @@ async def complete(
             status = getattr(exc, "status_code", None)
             retryable = isinstance(exc, (APIConnectionError, APITimeoutError)) or status in _RETRYABLE_STATUSES
             if retryable and attempt < _MAX_RETRIES - 1:
-                wait = _RETRY_BASE_SECONDS ** (attempt + 1)  # 2s, 4s
+                wait = _RETRY_BACKOFF_BASE ** (attempt + 1)  # 2s, 4s
                 logger.warning(
                     "anthropic.retrying",
                     attempt=attempt + 1,

@@ -1,7 +1,5 @@
 from datetime import datetime
-from typing import Any
-
-from sqlalchemy import DateTime, ForeignKey, JSON, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, JSON, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -11,11 +9,14 @@ class Base(DeclarativeBase):
 
 class Interview(Base):
     __tablename__ = "interviews"
+    __table_args__ = (
+        CheckConstraint("status IN ('active', 'done', 'cancelled')", name="ck_interview_status"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     company: Mapped[str]
     role: Mapped[str]
-    round_types: Mapped[list[Any]] = mapped_column(JSON)
+    round_types: Mapped[list[str]] = mapped_column(JSON)
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(default="active")  # active | done | cancelled
     created_at: Mapped[datetime] = mapped_column(
@@ -25,6 +26,12 @@ class Interview(Base):
 
 class PrepPlan(Base):
     __tablename__ = "prep_plans"
+    __table_args__ = (
+        CheckConstraint(
+            "self_rating IN ('easy', 'medium', 'hard') OR self_rating IS NULL",
+            name="ck_prepplan_self_rating",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     interview_id: Mapped[int] = mapped_column(ForeignKey("interviews.id"))
@@ -77,3 +84,4 @@ class OutboundIdempotency(Base):
     idempotency_key: Mapped[str] = mapped_column(primary_key=True)
     message_sid: Mapped[str]
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(default="sent")  # sent | send_failed

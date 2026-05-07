@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import get_args
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
@@ -18,6 +19,7 @@ from app.db.session import async_session_factory
 from app.integrations.twilio_client import send_whatsapp
 from app.lib.chunker import chunk_message
 from app.lib.logging import get_logger
+from app.schemas.domain import RoundType
 from app.schemas.webhooks import TwilioInbound
 from app.agents.orchestrator import MockOrchestrator
 from app.lib.user_context import get_user_context
@@ -37,9 +39,9 @@ _HELP = (
     "  status         — show active interviews"
 )
 
-# Subset of RoundType valid for user-initiated mock sessions.
-# Excludes "hiring_manager" and "unknown" — no mock interview handler for those.
-_MOCK_ROUNDS = {"dsa", "lld", "sysdesign", "behavioral"}
+# Derived from the domain's RoundType; exclude rounds with no mock handler.
+_MOCK_ROUNDS: set[str] = {r.lower() for r in get_args(RoundType)} - {"hiring_manager", "unknown"}
+_DEFAULT_ROUND_TYPES: list[str] = _DEFAULT_ROUND_TYPES
 
 
 # ---------------------------------------------------------------------------
@@ -113,14 +115,14 @@ async def _handle_prep(sender: str, args: list[str]) -> str:
         interview = await InterviewRepository(session).create(
             company=company,
             role="Unknown",
-            round_types=["DSA", "LLD", "sysdesign", "behavioral"],
+            round_types=_DEFAULT_ROUND_TYPES,
         )
 
     plan_md = await generate_plan(
         interview_id=interview.id,
         company=company,
         role="Unknown",
-        round_types=["DSA", "LLD", "sysdesign", "behavioral"],
+        round_types=_DEFAULT_ROUND_TYPES,
     )
 
     async with async_session_factory() as session:
@@ -299,7 +301,7 @@ async def twilio_webhook(request: Request) -> Response:
     async def _bg():
         try:
             reply = await _route(payload)
-            await _respond(to=payload.From, body=reply)
+            await _respond(to=payload.From, text=reply)
         except Exception as exc:
             logger.error("twilio.route.error", error=str(exc), exc_info=True)
             try:

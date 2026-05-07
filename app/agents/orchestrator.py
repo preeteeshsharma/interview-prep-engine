@@ -42,7 +42,11 @@ async def _get_transcript(session_id: int) -> list[dict]:
     mock = await _load_session(session_id)
     if not mock.transcript_json:
         return []
-    return json.loads(mock.transcript_json)
+    try:
+        return json.loads(mock.transcript_json)
+    except json.JSONDecodeError:
+        logger.error("orchestrator.transcript_corrupt", session_id=session_id)
+        return []
 
 
 async def _save_transcript(session_id: int, transcript: list[dict]) -> None:
@@ -109,13 +113,16 @@ class MockOrchestrator:
         await _save_transcript(session_id, transcript)
 
         # Persist latest rubric into session (overwrite — we keep the most recent).
-        async with async_session_factory() as session:
-            result = await session.execute(
-                select(MockSession).where(MockSession.id == session_id)
-            )
-            mock_row = result.scalar_one()
-            mock_row.rubric_json = rubric.model_dump_json()
-            await session.commit()
+        try:
+            async with async_session_factory() as session:
+                result = await session.execute(
+                    select(MockSession).where(MockSession.id == session_id)
+                )
+                mock_row = result.scalar_one()
+                mock_row.rubric_json = rubric.model_dump_json()
+                await session.commit()
+        except Exception as exc:
+            logger.warning("orchestrator.rubric_persist_failed", session_id=session_id, error=str(exc), exc_info=True)
 
         logger.info(
             "orchestrator.turn.done",
@@ -137,11 +144,15 @@ class MockOrchestrator:
 
         # Load latest rubric (accumulated from run_turn calls).
         mock = await _load_session(session_id)
-        rubric = (
-            RubricScore.model_validate_json(mock.rubric_json)
-            if mock.rubric_json
-            else RubricScore(depth=3, clarity=3, edge_cases=3, time_management=3, requirements=3)
-        )
+        try:
+            rubric = (
+                RubricScore.model_validate_json(mock.rubric_json)
+                if mock.rubric_json
+                else RubricScore(depth=3, clarity=3, edge_cases=3, time_management=3, requirements=3)
+            )
+        except Exception as exc:
+            logger.warning("orchestrator.rubric_load_failed", session_id=session_id, error=str(exc), exc_info=True)
+            rubric = RubricScore(depth=3, clarity=3, edge_cases=3, time_management=3, requirements=3)
 
         try:
             critique = await _coach.critique(transcript, rubric)

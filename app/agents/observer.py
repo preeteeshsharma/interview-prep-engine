@@ -49,5 +49,5 @@ class Observer:
         try:
             return RubricScore.model_validate_json(raw.strip())
         except Exception as exc:
-            logger.warning("observer.parse_failed", error=str(exc), raw=raw[:200])
+            logger.warning("observer.parse_failed", error=str(exc), raw=raw[:200], exc_info=True)
             return RubricScore(depth=3, clarity=3, edge_cases=3, time_management=3, requirements=3)

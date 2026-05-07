@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 
 
 class TurnOutput(BaseModel):
-    question: str
+    question: str = Field(min_length=1)
     follow_up_hints: list[str]
     missing_justifications: list[str]
 
@@ -20,8 +20,8 @@ class RubricScore(BaseModel):
 
 class CritiqueEntry(BaseModel):
     quote_offset: int = Field(ge=0)
-    issue: str
-    suggestion: str
+    issue: str = Field(min_length=1)
+    suggestion: str = Field(min_length=1)
 
 
 class Critique(BaseModel):

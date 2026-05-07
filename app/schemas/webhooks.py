@@ -12,6 +12,6 @@ class TwilioInbound(BaseModel):
 class MailgunInbound(BaseModel):
     """JSON payload from Mailgun inbound route."""
 
-    sender: str
-    subject: str
+    sender: str = Field(min_length=1)
+    subject: str = Field(min_length=1)
     body_plain: str = ""

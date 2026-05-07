@@ -58,7 +58,7 @@ async def classify_rounds(jd_text: str) -> list[str]:
         if not rounds:
             rounds = ["unknown"]
     except Exception as exc:
-        logger.warning("classify_rounds.parse_failed", raw=raw[:200], error=str(exc))
+        logger.warning("classify_rounds.parse_failed", raw=raw[:200], error=str(exc), exc_info=True)
         rounds = ["unknown"]
 
     logger.info("classify_rounds.done", rounds=rounds)

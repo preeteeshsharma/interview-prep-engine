@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from pydantic import ValidationError
+
 from app.integrations.anthropic_client import complete
 from app.lib.logging import get_logger
 from app.schemas.agent_io import Critique, CritiqueEntry, RubricScore
@@ -80,8 +82,8 @@ class Coach:
                     entries=valid_entries,
                     overall_summary=parsed.get("overall_summary", ""),
                 )
-            except Exception as exc:
-                logger.warning("coach.parse_failed", error=str(exc), raw=raw[:200])
+            except (json.JSONDecodeError, ValueError, ValidationError) as exc:
+                logger.warning("coach.parse_failed", error=str(exc), raw=raw[:200], exc_info=True)
                 if attempt < _MAX_RETRIES - 1:
                     error_context = f"JSON parse failed: {exc}"
                     continue

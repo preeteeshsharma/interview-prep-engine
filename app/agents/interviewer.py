@@ -116,7 +116,7 @@ class Interviewer:
             parsed = TurnOutput.model_validate_json(raw.strip())
             return parsed.question
         except Exception as exc:
-            logger.warning("interviewer.start_session.parse_failed", error=str(exc), raw=raw[:200])
+            logger.warning("interviewer.start_session.parse_failed", error=str(exc), raw=raw[:200], exc_info=True)
             return raw.strip()
 
     async def next_turn(self, transcript: list[dict], round_type: str) -> TurnOutput:
@@ -133,7 +133,7 @@ class Interviewer:
         try:
             return TurnOutput.model_validate_json(raw.strip())
         except Exception as exc:
-            logger.warning("interviewer.parse_failed", error=str(exc), raw=raw[:200])
+            logger.warning("interviewer.parse_failed", error=str(exc), raw=raw[:200], exc_info=True)
             return TurnOutput(
                 question=raw.strip(),
                 follow_up_hints=[],
