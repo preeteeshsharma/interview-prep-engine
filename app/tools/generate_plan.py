@@ -57,14 +57,13 @@ the pattern being drilled, not just the problem name. ~45–60 min per problem.
 Output ONLY valid markdown starting with the heading. No preamble outside the markdown.
 
 # Prep Plan: {company} — {role}
-**Budget:** {budget} min over {days} days
+**Interview:** {interview_date}
 **Rounds:** {round_types}
 **Generated:** {today}
 
 ---
 
 ## Day 1 — {focus_area}
-**Budget today:** {N} min
 
 ### {Round Type}: {drill_name}
 - **Pattern / goal:** [one sentence]
@@ -86,7 +85,8 @@ Output ONLY valid markdown starting with the heading. No preamble outside the ma
  If none, write "None identified yet — first session will surface these."]
 
 ## Rules
-- Spread drills across days respecting the per-day budget (total ÷ days)
+- Cover every round type fully — do not skip or summarise drills to save space
+- Spread drills across available days; front-load harder rounds (DSA, LLD, sysdesign)
 - Schedule harder rounds (DSA, LLD, sysdesign) earlier in the plan
 - Never exceed per-drill time limits: DSA 60 min, LLD 40 min, sysdesign 60 min,
   behavioral 20 min, hiring_manager 30 min

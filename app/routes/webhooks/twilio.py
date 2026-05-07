@@ -430,23 +430,17 @@ async def _handle_study(sender: str, args: list[str]) -> str:
 
     company_slug = interview.company.lower().replace(" ", "-")
     company_label = interview.company
-    # Pre-populate round from the interview's own round_type if not given.
-    round_slug = (round_hint or interview.round_type or "").lower() or None
 
-    if not round_slug:
-        available = await list_vault_rounds(
-            company_slug, github_token=ctx.github_token, vault_repo=ctx.vault_repo
-        )
-        if len(available) == 1:
-            round_slug = available[0]
-        elif available:
-            options = " / ".join(available)
-            pending = {"_command": "study", "company": company_label, "round": None}
-            async with async_session_factory() as session:
-                await WaWindowRepository(session).set_pending_prep(sender, pending)
-            return f"Which round for {company_label}? {options}\n\nReply: study {company_label.lower()} <round>"
-        else:
-            return f"No prep found for {company_label}. Run 'prep {company_label} <date>' first."
+    # Read vault_path from DB — it encodes the exact round dir used at commit time.
+    async with async_session_factory() as session:
+        plan = await PrepPlanRepository(session).get_pending(interview.id)
+
+    if not plan or not plan.vault_path:
+        return f"No prep found for {company_label}. Run 'prep {company_label} <date>' first."
+
+    # vault_path format: {company_slug}/{round_slug}/{epoch}-plan.md
+    parts = plan.vault_path.split("/")
+    round_slug = parts[1] if len(parts) >= 3 else "general"
 
     return await _execute_study(sender, company_slug, company_label, round_slug, ctx)
 
@@ -509,10 +503,15 @@ async def _handle_study_followup(sender: str, pending: dict, body: str) -> str:
 
     company_slug = interview.company.lower().replace(" ", "-")
     company_label = interview.company
-    round_slug = (round_hint or interview.round_type or "").lower() or None
-    if not round_slug:
-        available = await list_vault_rounds(company_slug, github_token=ctx.github_token, vault_repo=ctx.vault_repo)
-        round_slug = available[0] if available else "general"
+
+    async with async_session_factory() as session:
+        plan = await PrepPlanRepository(session).get_pending(interview.id)
+
+    if not plan or not plan.vault_path:
+        return f"No prep found for {company_label}. Run 'prep {company_label} <date>' first."
+
+    parts = plan.vault_path.split("/")
+    round_slug = parts[1] if len(parts) >= 3 else "general"
 
     return await _execute_study(sender, company_slug, company_label, round_slug, ctx)
 

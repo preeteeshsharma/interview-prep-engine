@@ -192,7 +192,7 @@ def test_epoch_sort_mixed_with_old_format_filenames():
 
 @pytest.mark.asyncio
 async def test_handle_study_returns_no_research_found_on_404(monkeypatch):
-    """When vault has no round dirs for company → returns 'No prep found'."""
+    """When no pending PrepPlan exists for the interview → returns 'No prep found'."""
     from app.routes.webhooks.twilio import _handle_study
 
     mock_interview = MagicMock()
@@ -200,8 +200,11 @@ async def test_handle_study_returns_no_research_found_on_404(monkeypatch):
     mock_interview.company = "Stripe"
     mock_interview.round_type = None
 
-    mock_repo = AsyncMock()
-    mock_repo.list_active.return_value = [mock_interview]
+    mock_interview_repo = AsyncMock()
+    mock_interview_repo.list_active.return_value = [mock_interview]
+
+    mock_plan_repo = AsyncMock()
+    mock_plan_repo.get_pending.return_value = None  # no plan in DB
 
     mock_session = AsyncMock()
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -210,14 +213,13 @@ async def test_handle_study_returns_no_research_found_on_404(monkeypatch):
     from app.tools.parse_prep_intent import PrepIntent
     fake_intent = PrepIntent(company=None, rounds=None)
 
-    # list_vault_rounds returns [] (404 case) → no rounds available
     with patch("app.routes.webhooks.twilio.async_session_factory", return_value=mock_session), \
-         patch("app.routes.webhooks.twilio.InterviewRepository", return_value=mock_repo), \
+         patch("app.routes.webhooks.twilio.InterviewRepository", return_value=mock_interview_repo), \
+         patch("app.routes.webhooks.twilio.PrepPlanRepository", return_value=mock_plan_repo), \
          patch("app.lib.prep_pipeline.get_user_context", new=AsyncMock(
              return_value=MagicMock(github_token="tok", vault_repo="user/vault")
          )), \
-         patch("app.routes.webhooks.twilio.parse_prep_intent", new=AsyncMock(return_value=fake_intent)), \
-         patch("app.routes.webhooks.twilio.list_vault_rounds", new=AsyncMock(return_value=[])):
+         patch("app.routes.webhooks.twilio.parse_prep_intent", new=AsyncMock(return_value=fake_intent)):
         result = await _handle_study("whatsapp:+91999", [])
 
     assert "No prep found" in result
@@ -226,7 +228,7 @@ async def test_handle_study_returns_no_research_found_on_404(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_study_returns_no_research_found_on_missing_candidates(monkeypatch):
-    """When vault round dir has no research/plan files → returns 'No prep found'."""
+    """When vault has no research/plan files for the stored path → returns 'No prep found'."""
     from app.routes.webhooks.twilio import _handle_study
 
     mock_interview = MagicMock()
@@ -234,8 +236,14 @@ async def test_handle_study_returns_no_research_found_on_missing_candidates(monk
     mock_interview.company = "Zapier"
     mock_interview.round_type = None
 
-    mock_repo = AsyncMock()
-    mock_repo.list_active.return_value = [mock_interview]
+    mock_interview_repo = AsyncMock()
+    mock_interview_repo.list_active.return_value = [mock_interview]
+
+    mock_plan = MagicMock()
+    mock_plan.vault_path = "zapier/dsa/1778000000-plan.md"
+
+    mock_plan_repo = AsyncMock()
+    mock_plan_repo.get_pending.return_value = mock_plan
 
     mock_session = AsyncMock()
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -244,14 +252,13 @@ async def test_handle_study_returns_no_research_found_on_missing_candidates(monk
     from app.tools.parse_prep_intent import PrepIntent
     fake_intent = PrepIntent(company=None, rounds=None)
 
-    # list_vault_rounds returns one round, but load_vault_context finds nothing.
     with patch("app.routes.webhooks.twilio.async_session_factory", return_value=mock_session), \
-         patch("app.routes.webhooks.twilio.InterviewRepository", return_value=mock_repo), \
+         patch("app.routes.webhooks.twilio.InterviewRepository", return_value=mock_interview_repo), \
+         patch("app.routes.webhooks.twilio.PrepPlanRepository", return_value=mock_plan_repo), \
          patch("app.lib.prep_pipeline.get_user_context", new=AsyncMock(
              return_value=MagicMock(github_token="tok", vault_repo="user/vault")
          )), \
          patch("app.routes.webhooks.twilio.parse_prep_intent", new=AsyncMock(return_value=fake_intent)), \
-         patch("app.routes.webhooks.twilio.list_vault_rounds", new=AsyncMock(return_value=["dsa"])), \
          patch("app.routes.webhooks.twilio.load_vault_context", new=AsyncMock(return_value=(None, None))):
         result = await _handle_study("whatsapp:+91999", [])
 
