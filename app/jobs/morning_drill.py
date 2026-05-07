@@ -26,6 +26,23 @@ logger = get_logger(__name__)
 _SKIP_WEIGHT_BUMP = 2.0
 
 
+async def _get_active_users() -> list[tuple[str, object]]:
+    """Return (whatsapp_phone, UserContext) for every user to drill.
+
+    V1: single owner from settings.
+    V2: replace body — query User table, return one entry per registered user:
+        async with async_session_factory() as session:
+            users = await UserRepository(session).list_all()
+        return [
+            (user.whatsapp_phone, UserContext(user.email, user.github_token, user.vault_repo))
+            for user in users if user.whatsapp_phone
+        ]
+    """
+    from app.config import settings
+    ctx = await get_user_context()
+    return [(settings.twilio_to_whatsapp, ctx)]
+
+
 async def run_morning_drill() -> None:
     """7am IST daily cron. For each active interview:
     1. Mark yesterday's uncompleted plan as skipped (and bump weak_patterns).
@@ -37,44 +54,36 @@ async def run_morning_drill() -> None:
     logger.info("morning_drill.started")
     today = date.today().isoformat()
 
-    async with async_session_factory() as session:
-        interviews = await InterviewRepository(session).list_active()
+    for recipient, ctx in await _get_active_users():
+        # V2: pass user_email=ctx.email to filter interviews per user.
+        async with async_session_factory() as session:
+            interviews = await InterviewRepository(session).list_active()
 
-    if not interviews:
-        logger.info("morning_drill.no_active_interviews")
-        return
+        if not interviews:
+            logger.info("morning_drill.no_active_interviews", recipient=recipient)
+            continue
 
-    from app.config import settings
-    recipient = settings.twilio_to_whatsapp
-    # V2: iterate over registered users; for each get ctx = await get_user_context(user.phone)
-    ctx = await get_user_context()
+        for interview in interviews:
+            try:
+                await _process_interview(
+                    interview_id=interview.id,
+                    company=interview.company,
+                    role=interview.role,
+                    round_types=json.loads(interview.round_types),
+                    recipient=recipient,
+                    today=today,
+                    github_token=ctx.github_token,
+                    vault_repo=ctx.vault_repo,
+                )
+            except Exception as exc:
+                logger.error(
+                    "morning_drill.interview_failed",
+                    interview_id=interview.id,
+                    company=interview.company,
+                    error=str(exc),
+                )
 
-    for interview in interviews:
-        interview_id = interview.id
-        company = interview.company
-        role = interview.role
-        round_types = json.loads(interview.round_types)
-
-        try:
-            await _process_interview(
-                interview_id=interview_id,
-                company=company,
-                role=role,
-                round_types=round_types,
-                recipient=recipient,
-                today=today,
-                github_token=ctx.github_token,
-                vault_repo=ctx.vault_repo,
-            )
-        except Exception as exc:
-            logger.error(
-                "morning_drill.interview_failed",
-                interview_id=interview_id,
-                company=company,
-                error=str(exc),
-            )
-
-    logger.info("morning_drill.done", interviews=len(interviews))
+    logger.info("morning_drill.done")
 
 
 async def _process_interview(

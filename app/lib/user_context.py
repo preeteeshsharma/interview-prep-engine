@@ -12,30 +12,31 @@ class UserContext:
     vault_repo: str
 
 
-async def get_user_context(sender_phone: str | None = None) -> UserContext:
-    """Return the UserContext for a given WhatsApp sender.
+async def get_user_context(
+    sender_phone: str | None = None,
+    email: str | None = None,
+) -> UserContext:
+    """Return the UserContext for a given sender (WhatsApp phone or email).
 
-    V1 — single owner: always returns the owner configured in settings.
-         sender_phone is accepted but ignored.
+    V1 — single owner: both params accepted but ignored. Always returns owner
+         from settings.
 
-    V2 — multi-user: look up User table by sender_phone; raise if not registered.
-         Replace this function body only — all callers stay unchanged.
+    V2 — replace this body only. All callers already pass the right identifier.
+         Lookup order: phone → email → raise UnregisteredUserError.
 
-    ## V2 migration steps (this function is the only seam to change):
-    1. Add User table (email PK, whatsapp_phone, github_token, vault_repo)
-    2. Add Alembic migration
-    3. Replace body below with:
-           async with async_session_factory() as session:
-               user = await UserRepository(session).get_by_phone(sender_phone)
-               if not user:
-                   raise UnregisteredUserError(sender_phone)
-               return UserContext(
-                   email=user.email,
-                   github_token=user.github_token,
-                   vault_repo=user.vault_repo,
-               )
-    4. Add register + link intents to Twilio router
-    5. Add inbox registration flow (email with subject "register")
+         async with async_session_factory() as session:
+             repo = UserRepository(session)
+             user = (
+                 await repo.get_by_phone(sender_phone) if sender_phone
+                 else await repo.get_by_email(email)
+             )
+             if not user:
+                 raise UnregisteredUserError(sender_phone or email)
+             return UserContext(
+                 email=user.email,
+                 github_token=user.github_token,
+                 vault_repo=user.vault_repo,
+             )
     """
     return UserContext(
         email=settings.owner_email,

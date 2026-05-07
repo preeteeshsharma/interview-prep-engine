@@ -25,6 +25,32 @@ Return ONLY a JSON object: {"company": "...", "role": "..."}
 If you cannot determine one of the values, use "Unknown".
 """
 
+_REGISTRATION_SUBJECTS = {"register", "signup", "sign up", "sign-up"}
+
+
+def _is_registration(payload: MailgunInbound) -> bool:
+    """Return True if this email is a registration request, not an interview forward.
+
+    V2: user emails subject "register" with github_token + vault_repo in body.
+    V1: always False — registration not yet implemented.
+    """
+    return payload.subject.strip().lower() in _REGISTRATION_SUBJECTS
+
+
+async def _handle_registration(payload: MailgunInbound) -> None:
+    """Handle a registration email from a new user.
+
+    V2 implementation: parse github_token + vault_repo from body,
+    create User row keyed by payload.sender email, reply via Mailgun API.
+
+    V1: log and no-op — single owner only.
+    """
+    logger.info(
+        "inbox.registration.not_implemented",
+        sender=payload.sender,
+        hint="V2: parse body for github_token + vault_repo, create User row",
+    )
+
 
 async def _parse_company_role(subject: str, body: str) -> tuple[str, str]:
     raw = await complete(
@@ -51,11 +77,17 @@ def _validate_mailgun_signature(timestamp: str, token: str, signature: str) -> N
 
 
 async def _run_pipeline(payload: MailgunInbound) -> None:
-    """Classify → create DB record → generate plan → commit to vault."""
-    # V2: pass sender email to get_user_context() for per-user GitHub config.
-    ctx = await get_user_context()
+    """Route inbound email: registration or interview forward."""
+    if _is_registration(payload):
+        await _handle_registration(payload)
+        return
+
+    # V2: get_user_context(email=payload.sender) returns per-user GitHub config.
+    # V1: sender email is passed but ignored — always returns owner context.
+    ctx = await get_user_context(email=payload.sender)
+
     company, role = await _parse_company_role(payload.subject, payload.body_plain)
-    logger.info("inbox.parsed", company=company, role=role)
+    logger.info("inbox.parsed", company=company, role=role, sender=payload.sender)
 
     jd_text = f"{payload.subject}\n\n{payload.body_plain}"
     rounds = await classify_rounds(jd_text)
@@ -110,7 +142,6 @@ async def inbox_webhook(request: Request) -> dict[str, str]:
     )
     logger.info("mailgun.inbound.received", sender=payload.sender, subject=payload.subject)
 
-    # Run pipeline in background so webhook returns immediately.
     asyncio.create_task(_run_pipeline(payload))
 
     return {"status": "queued"}

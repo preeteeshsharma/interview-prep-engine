@@ -21,6 +21,7 @@ from app.lib.chunker import chunk_message
 from app.lib.logging import get_logger
 from app.schemas.webhooks import TwilioInbound
 from app.agents.orchestrator import MockOrchestrator
+from app.lib.user_context import get_user_context
 from app.tools.generate_plan import generate_plan
 from app.tools.record_completion import record_completion
 
@@ -69,6 +70,8 @@ def _parse_intent(body: str) -> tuple[str, list[str]]:
         return "done", rest
     if verb == "status":
         return "status", []
+    if verb == "link":
+        return "link", rest  # V2: link <email> associates phone → User account
     return "freeform", parts  # treat entire body as freeform mock turn
 
 
@@ -223,12 +226,30 @@ async def _handle_freeform(sender: str, body: str) -> str:
 # Pipeline
 # ---------------------------------------------------------------------------
 
+async def _handle_link(sender: str, args: list[str]) -> str:
+    """Associate this WhatsApp number with a registered email account.
+
+    V2 implementation: look up User by email, set whatsapp_phone = sender.
+    V1: not yet implemented — single owner only.
+    """
+    if not args:
+        return "Usage: link <your-email>"
+    email = args[0]
+    logger.info("twilio.link.not_implemented", sender=sender, email=email,
+                hint="V2: UserRepository(session).link_phone(email, sender)")
+    return "Multi-user linking coming in V2. You're already set up as the owner."
+
+
 async def _route(payload: TwilioInbound) -> str:
     sender = payload.From
     intent, args = _parse_intent(payload.Body)
 
     async with async_session_factory() as session:
         await WaWindowRepository(session).record_inbound(sender)
+
+    # V2: get_user_context(sender_phone=sender) returns per-user config from DB.
+    # V1: sender is passed but ignored — always returns owner context.
+    _ctx = await get_user_context(sender_phone=sender)
 
     logger.info("twilio.intent", sender=sender, intent=intent, args=args)
 
@@ -240,6 +261,8 @@ async def _route(payload: TwilioInbound) -> str:
         return await _handle_done(sender, args)
     if intent == "status":
         return await _handle_status(sender)
+    if intent == "link":
+        return await _handle_link(sender, args)
     if intent == "freeform":
         return await _handle_freeform(sender, payload.Body)
     return _HELP

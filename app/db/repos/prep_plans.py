@@ -44,7 +44,8 @@ class PrepPlanRepository:
         await self._session.refresh(plan)
         return plan
 
-    async def recent_completed(self, interview_id: int, days: int = 7) -> list[PrepPlan]:
+    async def recent_completed(self, interview_id: int, days: int = 7, user_email: str | None = None) -> list[PrepPlan]:
+        # user_email filter added in V2 after migration.
         cutoff = datetime.now(timezone.utc).replace(
             hour=0, minute=0, second=0, microsecond=0
         )

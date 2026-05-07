@@ -30,10 +30,10 @@ class InterviewRepository:
         await self._session.refresh(interview)
         return interview
 
-    async def list_active(self) -> list[Interview]:
-        result = await self._session.execute(
-            select(Interview).where(Interview.status == "active")
-        )
+    async def list_active(self, user_email: str | None = None) -> list[Interview]:
+        # user_email filter added in V2 after adding user_email FK column + migration.
+        query = select(Interview).where(Interview.status == "active")
+        result = await self._session.execute(query)
         return list(result.scalars().all())
 
     async def get(self, id: int) -> Interview | None:
