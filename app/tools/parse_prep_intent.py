@@ -164,7 +164,6 @@ async def parse_prep_intent(message: str) -> PrepIntent:
             messages=[{"role": "user", "content": message}],
             system=system,
             model="claude-haiku-4-5-20251001",
-            max_tokens=256,
         )
         data = json.loads(strip_fences(raw))
         rounds = data.get("rounds")
