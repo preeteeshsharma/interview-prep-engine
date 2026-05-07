@@ -1,7 +1,7 @@
 import json
 from typing import get_args
 
-from app.integrations.llm_client import complete
+from app.integrations.llm_client import complete_fast as complete
 from app.lib.logging import get_logger
 from app.schemas.domain import RoundType
 
@@ -47,7 +47,6 @@ async def classify_rounds(jd_text: str) -> list[str]:
     raw = await complete(
         messages=[{"role": "user", "content": f"Job description:\n\n{jd_text}"}],
         system=_SYSTEM,
-        model="claude-haiku-4-5-20251001",
         max_tokens=128,
     )
     try:

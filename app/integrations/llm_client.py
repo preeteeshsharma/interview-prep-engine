@@ -1,13 +1,19 @@
-"""Unified LLM facade: Gemini (primary) → Anthropic (fallback).
+"""Unified LLM facade with two tiers:
 
-Both providers implement LLMProvider. All callers import complete() and
-complete_with_tools() from here — provider selection is invisible to them.
+  complete() / complete_with_tools()
+      Claude primary → Gemini fallback.
+      Use for reasoning, research, interview, coaching — quality matters.
+
+  complete_fast() / complete_fast_with_tools()
+      Gemini Flash primary → Claude Haiku fallback.
+      Use for classification, parsing, scoring — speed and cost matter.
 """
 from __future__ import annotations
 
 from app.config import settings
 from app.integrations.anthropic_client import AnthropicProvider
 from app.integrations.llm_interface import LLMProvider
+from app.lib.app_config import get as get_config
 from app.lib.logging import get_logger
 
 logger = get_logger(__name__)
@@ -34,6 +40,20 @@ if settings.google_cloud_project or settings.gemini_api_key:
     _gemini = GeminiProvider()
 
 
+async def _primary() -> LLMProvider:
+    provider = await get_config("llm.primary_provider")
+    return _gemini if (provider == "gemini" and _gemini is not None) else _anthropic
+
+
+async def _fast() -> LLMProvider:
+    provider = await get_config("llm.fast_provider")
+    return _gemini if (provider == "gemini" and _gemini is not None) else _anthropic
+
+
+async def _fallback(primary: LLMProvider) -> LLMProvider | None:
+    return _gemini if primary is _anthropic else _anthropic
+
+
 async def complete(
     messages: list[dict],
     system: str,
@@ -41,14 +61,17 @@ async def complete(
     max_tokens: int | None = None,
 ) -> str:
     tokens = max_tokens or _MAX_TOKENS.get(model, 1024)
-    if _gemini is not None:
-        try:
-            result = await _gemini.complete(messages, system, model, tokens)
-            logger.debug("llm.provider", provider="gemini", model=model)
-            return result
-        except Exception as exc:
-            logger.warning("llm.gemini_failed", error=str(exc), fallback="anthropic")
-    return await _anthropic.complete(messages, system, model, tokens)
+    primary = await _primary()
+    try:
+        result = await primary.complete(messages, system, model, tokens)
+        logger.debug("llm.provider", provider=type(primary).__name__, model=model)
+        return result
+    except Exception as exc:
+        fallback = await _fallback(primary)
+        if fallback is None:
+            raise
+        logger.warning("llm.primary_failed", error=str(exc), fallback=type(fallback).__name__)
+    return await fallback.complete(messages, system, model, tokens)
 
 
 async def complete_with_tools(
@@ -59,11 +82,60 @@ async def complete_with_tools(
     max_tokens: int | None = None,
 ) -> str:
     tokens = max_tokens or _MAX_TOKENS_TOOLS.get(model, 4096)
-    if _gemini is not None:
-        try:
-            result = await _gemini.complete_with_tools(messages, system, tools, model, tokens)
-            logger.debug("llm.provider", provider="gemini", model=model)
-            return result
-        except Exception as exc:
-            logger.warning("llm.gemini_tools_failed", error=str(exc), fallback="anthropic")
-    return await _anthropic.complete_with_tools(messages, system, tools, model, tokens)
+    primary = await _primary()
+    try:
+        result = await primary.complete_with_tools(messages, system, tools, model, tokens)
+        logger.debug("llm.provider", provider=type(primary).__name__, model=model)
+        return result
+    except Exception as exc:
+        fallback = await _fallback(primary)
+        if fallback is None:
+            raise
+        logger.warning("llm.primary_tools_failed", error=str(exc), fallback=type(fallback).__name__)
+    return await fallback.complete_with_tools(messages, system, tools, model, tokens)
+
+
+# ---------------------------------------------------------------------------
+# Fast tier — reads llm.fast_provider from config (default: gemini)
+# ---------------------------------------------------------------------------
+
+_FAST_MODEL = "claude-haiku-4-5-20251001"
+
+
+async def complete_fast(
+    messages: list[dict],
+    system: str,
+    max_tokens: int | None = None,
+) -> str:
+    tokens = max_tokens or _MAX_TOKENS.get(_FAST_MODEL, 512)
+    fast = await _fast()
+    try:
+        result = await fast.complete(messages, system, _FAST_MODEL, tokens)
+        logger.debug("llm.provider", provider=type(fast).__name__ + "-fast", model=_FAST_MODEL)
+        return result
+    except Exception as exc:
+        fallback = await _fallback(fast)
+        if fallback is None:
+            raise
+        logger.warning("llm.fast_failed", error=str(exc), fallback=type(fallback).__name__)
+    return await fallback.complete(messages, system, _FAST_MODEL, tokens)
+
+
+async def complete_fast_with_tools(
+    messages: list[dict],
+    system: str,
+    tools: list[dict],
+    max_tokens: int | None = None,
+) -> str:
+    tokens = max_tokens or _MAX_TOKENS_TOOLS.get(_FAST_MODEL, 1024)
+    fast = await _fast()
+    try:
+        result = await fast.complete_with_tools(messages, system, tools, _FAST_MODEL, tokens)
+        logger.debug("llm.provider", provider=type(fast).__name__ + "-fast", model=_FAST_MODEL)
+        return result
+    except Exception as exc:
+        fallback = await _fallback(fast)
+        if fallback is None:
+            raise
+        logger.warning("llm.fast_tools_failed", error=str(exc), fallback=type(fallback).__name__)
+    return await fallback.complete_with_tools(messages, system, tools, _FAST_MODEL, tokens)

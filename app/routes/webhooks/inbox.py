@@ -9,7 +9,7 @@ from app.config import settings
 from app.db.repos.interviews import InterviewRepository
 from app.db.repos.prep_plans import PrepPlanRepository
 from app.db.session import async_session_factory
-from app.integrations.llm_client import complete
+from app.integrations.llm_client import complete_fast as complete
 from app.integrations.github_client import commit_file
 from app.lib.logging import get_logger
 from app.lib.user_context import get_user_context
@@ -56,7 +56,6 @@ async def _parse_company_role(subject: str, body: str) -> tuple[str, str]:
     raw = await complete(
         messages=[{"role": "user", "content": f"Subject: {subject}\n\nBody:\n{body[:2000]}"}],
         system=_PARSE_SYSTEM,
-        model="claude-haiku-4-5-20251001",
         max_tokens=64,
     )
     try:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from app.integrations.llm_client import complete
+from app.integrations.llm_client import complete_fast as complete
 from app.lib.json_utils import strip_fences
 from app.lib.logging import get_logger
 from app.schemas.agent_io import RubricScore
@@ -44,7 +44,6 @@ class Observer:
         raw = await complete(
             messages=[{"role": "user", "content": f"Transcript:\n\n{formatted}"}],
             system=_SYSTEM,
-            model="claude-haiku-4-5-20251001",  # cheaper — rubric scoring is a smaller task
             max_tokens=128,
         )
         try:

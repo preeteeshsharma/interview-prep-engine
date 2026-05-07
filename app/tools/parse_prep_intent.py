@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from app.integrations.llm_client import complete
+from app.integrations.llm_client import complete_fast as complete
 from app.lib.json_utils import strip_fences
 from app.lib.logging import get_logger
 from app.schemas.domain import RoundType
@@ -163,7 +163,6 @@ async def parse_prep_intent(message: str) -> PrepIntent:
         raw = await complete(
             messages=[{"role": "user", "content": message}],
             system=system,
-            model="claude-haiku-4-5-20251001",
         )
         data = json.loads(strip_fences(raw))
         rounds = data.get("rounds")

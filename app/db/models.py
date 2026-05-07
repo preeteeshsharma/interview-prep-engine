@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, JSON, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -77,6 +77,16 @@ class WaWindowState(Base):
         DateTime(timezone=True), nullable=True
     )
     pending_prep: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class AppConfig(Base):
+    __tablename__ = "app_config"
+
+    key: Mapped[str] = mapped_column(primary_key=True)
+    value: Mapped[str]
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class OutboundIdempotency(Base):
