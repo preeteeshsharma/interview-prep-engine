@@ -14,9 +14,9 @@ logger = get_logger(__name__)
 
 _anthropic: LLMProvider = AnthropicProvider()
 
-# Gemini is primary when an API key is configured; otherwise Anthropic handles everything.
+# Gemini is primary when Vertex AI (GOOGLE_CLOUD_PROJECT) or direct API key is configured.
 _gemini: LLMProvider | None = None
-if settings.gemini_api_key:
+if settings.google_cloud_project or settings.gemini_api_key:
     from app.integrations.gemini_client import GeminiProvider
     _gemini = GeminiProvider()
 
