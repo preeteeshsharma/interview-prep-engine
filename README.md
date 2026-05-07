@@ -1,48 +1,123 @@
 # interview-prep-engine
 
-A deployed Python/FastAPI service that runs your interview prep loop via WhatsApp.
-
-Three triggers:
-- **Conversational `prep`** — send `prep Google senior backend june 15 dsa lld` (or just `prep Google`); the engine extracts what it can, asks once for anything missing, then researches and plans
-- **7am daily cron** — sends today's drill nudge via WhatsApp
-- **WhatsApp commands** — full mock interviews, Socratic study sessions, drill tracking
-
-Multi-agent mock interviews: Interviewer (Sonnet 4.6, adversarial), Observer (Haiku 4.5, parallel rubric scoring), Coach (Sonnet 4.6, post-session critique). Researcher (Sonnet 4.6 + live web search) generates cited company/role research. Tutor (Sonnet 4.6) runs Socratic `study` sessions from the research.
+A WhatsApp-based interview prep bot. You text it, it researches the company using live web search, generates a day-by-day plan, runs adversarial mock interviews, and commits everything to a private GitHub vault.
 
 ---
 
-## Architecture
+## What actually happens when you send `prep Fivetran Senior SWE, may 12, dsa`
 
 ```
-┌─────────────────┐                ┌────────────────────────────────────────┐
-│ Twilio WhatsApp │ ◄── outbound ──┤                                        │
-│ Sandbox         │                │   interview-prep-engine                │
-│                 │ ──── inbound ──►   (FastAPI / Python 3.12)              │
-└─────────────────┘                │                                        │
-                                   │  Agents                                │
-┌─────────────────┐                │   Researcher  sonnet-4-6 + web_search  │
-│ Anthropic API   │ ◄──────────────►   Interviewer sonnet-4-6 (adversarial) │
-│                 │                │   Observer    haiku-4-5  (rubric)      │
-│ web_search tool │                │   Coach       sonnet-4-6 (critique)    │
-└─────────────────┘                │   Tutor       sonnet-4-6 (Socratic)    │
-                                   │                                        │
-┌─────────────────┐                │  Skills (loaded as system prompts)     │
-│ Tavily Search   │ ◄──────────────►   interview_research.md                │
-│ (primary)       │                │   interview_prep_assistant.md          │
-└─────────────────┘                │   lld_problem_solving.md               │
-                                   │                                        │
-┌─────────────────┐                │  Tools                                 │
-│ GitHub API      │ ◄── commits ───►   parse_prep_intent  (Haiku parser)    │
-│ (prep-vault)    │                │   generate_plan                        │
-└─────────────────┘                │   record_completion                    │
-                                   │   research_company                     │
-┌─────────────────┐                │                                        │
-│ Supabase        │ ◄── state ─────►  interviews, prep_plans                │
-│ (PostgreSQL)    │                │  mock_sessions, weak_patterns          │
-└─────────────────┘                │  wa_window_state (+ pending_prep)      │
-                                   │  outbound_idempotency                  │
-                                   └────────────────────────────────────────┘
+1. parse_prep_intent (Haiku)
+   → extracts company=Fivetran, role=Senior SWE, date=2026-05-12, rounds=[dsa]
+   → "Coding Ability and Problem Solving" also works — mapped to dsa in Python
+
+2. researcher (Sonnet + Anthropic web_search)
+   → runs 4-6 searches across Blind, LeetCode Discuss, Glassdoor, Reddit
+   → guided by interview_research.md skill loaded as its system prompt
+   → returns a sourced report with per-question citations and a sources table
+   → single round specified → questions mode (actual Qs asked, not full loop)
+
+3. generate_plan (Haiku)
+   → takes the research + round types + days until interview
+   → guided by the plan system prompt (company-specific drills, LeetCode numbers)
+   → if research contains real questions, uses those as drill material
+
+4. DB write: Interview + PrepPlan rows in Supabase
+
+5. Vault commit: plan + research saved as markdown to prep-vault GitHub repo
+
+6. WhatsApp reply: first 1200 chars of plan + "(Full plan + sources in prep-vault)"
 ```
+
+---
+
+## What actually happens when you send `mock dsa`
+
+```
+1. Creates MockSession row in DB
+
+2. Interviewer (Sonnet) opens with a question
+   → system prompt = _ROUND_PROMPTS["dsa"] — Socratic hint ladder, never gives answer
+   → for lld: enforces 5-phase HelloInterview framework from lld_problem_solving.md
+
+3. Each reply triggers two parallel calls:
+   a. Interviewer (Sonnet) — next adversarial question
+   b. Observer (Haiku) — scores the turn against a rubric silently
+
+4. When you text "end":
+   → Coach (Sonnet) reads full transcript + Observer scores
+   → returns post-session critique with specific citations from your answers
+   → MockSession finalized in DB
+```
+
+---
+
+## What actually happens when you send `study`
+
+```
+1. Reads latest research file from prep-vault GitHub repo
+
+2. Tutor (Sonnet) opens the session
+   → system prompt = interview_prep_assistant.md skill
+   → lists all questions from research, classifies each:
+     [LeetCode] — known platform problem
+     [Local]    — build it on your machine
+     [Bug Squash] — fix bugs in a given codebase
+   → asks which one to start with
+
+3. Each reply: Tutor gives the next smallest useful hint (Socratic)
+   → never gives a complete solution unprompted
+   → hint ladder: question → pattern name → skeleton → explanation
+```
+
+---
+
+## How skills work
+
+The three `.md` files in `app/skills/` are **not prompt templates** — they are the full skill content from Claude's built-in skills, loaded as the system prompt for each agent at runtime:
+
+| Skill file | Used by | What it does |
+|---|---|---|
+| `interview_research.md` | Researcher | Directs multi-source search strategy, output format with citations |
+| `interview_prep_assistant.md` | Tutor | Socratic tutoring flow, question classification, hint ladder |
+| `lld_problem_solving.md` | Interviewer (lld) | 5-phase HelloInterview framework, SOLID enforcement |
+
+The agent receives the skill as its system prompt and a minimal task description as the user message — e.g. `"Research the Fivetran Senior SWE interview process — process mode."` The skill then drives the search planning and output format itself.
+
+---
+
+## Model choices and why
+
+| Agent | Model | Reason |
+|---|---|---|
+| Researcher | Sonnet 4.6 | Needs strong reasoning to plan searches, synthesize across sources, write citations |
+| Interviewer | Sonnet 4.6 | Adversarial probing requires nuanced follow-up; must track what candidate hasn't addressed |
+| Coach | Sonnet 4.6 | Post-session critique needs to cite specific transcript moments |
+| Tutor | Sonnet 4.6 | Socratic flow requires judging how much hint to give at each step |
+| Observer | Haiku 4.5 | Rubric scoring is classification — fast and cheap, runs in parallel with Interviewer |
+| parse_prep_intent | Haiku 4.5 | Simple extraction task; Sonnet overkill and wastes token quota |
+| generate_plan | Haiku 4.5 | Structured formatting against a template — no complex reasoning needed |
+
+---
+
+## Web search
+
+The researcher uses **Anthropic's built-in `web_search_20250305` tool** — included in the API, no external service needed. The model calls it multiple times per research run (guided by the skill's Step 2 search strategy).
+
+There is no Tavily dependency in the active code path. The `app/integrations/search/` directory contains an unused abstraction layer that was built before Anthropic's native search tool was available — it can be deleted.
+
+---
+
+## Rate limits (Tier 1 — 30k Sonnet input tokens/min)
+
+The researcher + web_search is the heavy consumer: each search round-trip feeds results back to the model as input tokens. With 4-6 searches, a single research run can consume 20-25k tokens.
+
+Mitigations in place:
+- Research context capped at 4000 chars before passing to generate_plan
+- generate_plan uses Haiku (separate rate limit bucket, 50k/min)
+- 429 retry waits 65s (per-minute limit needs >60s to reset; 2s retry is useless)
+
+Upgrading to Tier 2 (spend $5 real money on the API — credit grants don't count) raises Sonnet input to 160k/min and eliminates the constraint.
 
 ---
 
@@ -50,32 +125,47 @@ Multi-agent mock interviews: Interviewer (Sonnet 4.6, adversarial), Observer (Ha
 
 | Command | What it does |
 |---|---|
-| `prep Google` | Start conversational prep — engine asks for missing details |
-| `prep Zapier senior backend june 15 dsa lld` | Full details in one message — goes straight to plan |
-| `mock lld` | Start a mock interview (dsa / lld / sysdesign / behavioral) |
-| `study` | Start a Socratic study session from latest research |
-| `done hard` | Mark current drill complete and rate difficulty |
-| `status` | List active interviews with rounds and scheduled date |
-| `end` | End the current mock/study session and get Coach feedback |
+| `prep Fivetran Senior SWE, may 12, dsa` | Full details — straight to plan |
+| `prep Google` | Conversational — asks once for missing fields |
+| `prep Zapier SWE, june 15, Coding Ability and Problem Solving` | Actual round name works, mapped to dsa |
+| `mock dsa` | Start mock (dsa / lld / sysdesign / behavioral) |
+| `study` | Socratic session from latest research |
+| `done hard` | Mark drill complete (easy / medium / hard) |
+| `status` | List active interviews |
+| `end` | End mock/study session, get Coach critique |
 
-### Conversational `prep` flow
+### Conversational prep flow
 
-If you omit any of role, interview date, or rounds, the engine asks once:
+If details are missing, the engine asks once and proceeds with defaults on the follow-up:
 
 ```
-You: prep Google
-Bot: Got it. Still need:
-       • role (e.g. 'senior backend', 'L5 SWE')
-       • interview date (e.g. 'june 15')
-       • rounds (dsa / lld / sysdesign / behavioral / hiring_manager)
+You:  prep Google
+Bot:  Got it. Still need:
+        • role (e.g. 'senior backend', 'L5 SWE')
+        • interview date (e.g. 'june 15')
+        • rounds (dsa / lld / sysdesign / behavioral / hiring_manager)
+      Reply with the missing details (I'll use defaults if you skip).
 
-     Reply with the missing details (I'll use defaults if you skip).
-
-You: L5 SWE, june 20, dsa lld sysdesign
-Bot: Plan for Google (L5 SWE) on 2026-06-20: ...
+You:  L5 SWE, june 20, dsa lld sysdesign
+Bot:  Plan for Google (L5 SWE) on 2026-06-20: ...
 ```
 
-Skip the follow-up reply and the engine uses defaults (role: software engineer, days: 7, rounds: dsa/lld/sysdesign/behavioral).
+Defaults if you skip the follow-up: role=software engineer, days=7, rounds=dsa/lld/sysdesign/behavioral.
+
+Pending state is stored in `WaWindowState.pending_prep` (Supabase). A new command clears it.
+
+---
+
+## State model
+
+| Table | What's in it |
+|---|---|
+| `interviews` | company, role, round_types, scheduled_for, status |
+| `prep_plans` | plan_md, time_budget_min, completed_at, self_rating, skipped |
+| `mock_sessions` | round_type, transcript_json, rubric_json, critique_json |
+| `weak_patterns` | pattern, weight — drives drill reassignment |
+| `wa_window_state` | last_inbound_at, last_template_at, pending_prep (mid-conversation state) |
+| `outbound_idempotency` | prevents duplicate WhatsApp sends |
 
 ---
 
@@ -83,140 +173,60 @@ Skip the follow-up reply and the engine uses defaults (role: software engineer, 
 
 ### Prerequisites
 
-- Python 3.12+
-- [uv](https://github.com/astral-sh/uv) — `pip install uv`
-- A [Twilio](https://www.twilio.com) account (free sandbox works)
-- An [Anthropic](https://console.anthropic.com) API key
-- A [Supabase](https://supabase.com) project (free tier works)
-- A [Tavily](https://tavily.com) API key (free tier — used for web search in researcher)
-- A GitHub personal access token with `repo` scope
-- A **private** GitHub repo to use as your `prep-vault`
+- Python 3.12+, [uv](https://github.com/astral-sh/uv)
+- Twilio account (free sandbox)
+- Anthropic API key (paid account — credit grants alone stay on Tier 1)
+- Supabase project (free tier)
+- GitHub personal access token (`repo` scope) + private vault repo
 
-### 1. Clone and install
-
-```bash
-git clone https://github.com/preeteeshsharma/interview-prep-engine
-cd interview-prep-engine
-uv sync
-```
-
-### 2. Create your prep-vault repo
-
-Create a **private** GitHub repo (e.g. `yourname/prep-vault`). The engine commits
-prep plans and research reports as markdown — open it locally with Obsidian for a
-searchable knowledge base.
-
-### 3. Configure environment
-
-```bash
-cp .env.example .env
-```
-
-Fill in `.env`:
+### Environment
 
 ```env
-# Anthropic — console.anthropic.com → API Keys
 ANTHROPIC_API_KEY=sk-ant-...
 
-# Twilio — console.twilio.com → Account Info
 TWILIO_ACCOUNT_SID=AC...
 TWILIO_AUTH_TOKEN=...
-TWILIO_FROM_WHATSAPP=whatsapp:+14155238886   # Twilio sandbox number
-TWILIO_TO_WHATSAPP=whatsapp:+91...           # your WhatsApp number
+TWILIO_FROM_WHATSAPP=whatsapp:+14155238886
+TWILIO_TO_WHATSAPP=whatsapp:+91...
 
-# Tavily — app.tavily.com → API Keys (free tier: 1000 req/month)
-TAVILY_API_KEY=tvly-...
-
-# GitHub — Settings → Developer settings → Personal access tokens (repo scope)
 GITHUB_TOKEN=ghp_...
 GITHUB_VAULT_REPO=yourname/prep-vault
 
-# Supabase — project settings → Database → Connection string (Transaction pooler)
-# Use the asyncpg format:
-DATABASE_URL=postgresql+asyncpg://postgres.[project-ref]:[password]@aws-0-[region].pooler.supabase.com:5432/postgres
+# Supabase transaction pooler — asyncpg format
+DATABASE_URL=postgresql+asyncpg://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:5432/postgres
 ```
 
-### 4. Run locally
+No Tavily key needed — web search is Anthropic's built-in tool.
+
+### Run locally
 
 ```bash
+uv sync
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
+# expose: ngrok http 8000
+# set Twilio webhook to https://xxxx.ngrok.io/hooks/twilio
 ```
 
-Server starts on `http://localhost:8000`. Health check: `curl localhost:8000/health`
-
-### 5. Expose webhooks for local dev
+### Deploy
 
 ```bash
-ngrok http 8000
-```
-
-Use the `https://xxxx.ngrok.io` URL for Twilio webhook configuration.
-
-### 6. Connect Twilio WhatsApp Sandbox
-
-1. Twilio Console → Messaging → Try it out → Send a WhatsApp message
-2. Join the sandbox by sending the join code from your WhatsApp
-3. Set the inbound webhook URL to `https://xxxx.ngrok.io/hooks/twilio`
-4. Text `prep zapier` to test
-
----
-
-## Deploy to Fly.io
-
-```bash
-flyctl launch --no-deploy   # first time only
-flyctl secrets set ANTHROPIC_API_KEY=... TWILIO_AUTH_TOKEN=... # etc.
+flyctl secrets set ANTHROPIC_API_KEY=... TWILIO_AUTH_TOKEN=... GITHUB_TOKEN=... DATABASE_URL=...
 flyctl deploy
+# update Twilio webhook to https://interview-prep-engine.fly.dev/hooks/twilio
 ```
 
-The `fly.toml` runs `alembic upgrade head` as a release command before starting the server.
-After deploy: update your Twilio webhook URL to `https://interview-prep-engine.fly.dev/hooks/twilio`.
-
-**Fly.io + Twilio note:** Fly terminates TLS internally, so requests arrive as `http://`.
-Twilio signs with the public `https://` URL — the webhook handler corrects for this automatically.
+Fly terminates TLS internally — Twilio signs with `https://` but forwards as `http://`. The webhook handler corrects for this automatically before HMAC validation.
 
 ---
 
-## Mailgun (optional — for email-forwarded invites)
-
-Mailgun free sandbox works for development. Key constraints:
-
-- **Authorized recipients only** — add your email in the sandbox dashboard before testing
-- **1 inbound route** — sufficient for this setup
-- **100 emails/day** — plenty for personal use
-- **24h log retention** — enough to grab Gmail verification codes
-
-For production (forwarding from a real domain), upgrade to Foundation ($35/mo) or use a custom domain with Mailgun Flex.
-
----
-
-## Project layout
-
-```
-app/
-  agents/          # Researcher, Interviewer, Observer, Coach, Tutor, Orchestrator
-  db/              # SQLAlchemy models (Supabase/PostgreSQL), async repos
-  integrations/    # Anthropic, Twilio, GitHub clients; search/ (Tavily + fallback)
-  jobs/            # morning_drill cron (APScheduler, 7am IST)
-  lib/             # chunker, wa_window, idempotency, json_utils, logging
-  routes/          # /hooks/twilio, /hooks/inbox, /health
-  schemas/         # Pydantic models for agent I/O and webhooks
-  skills/          # interview_research.md, interview_prep_assistant.md, lld_problem_solving.md
-  tools/           # parse_prep_intent, generate_plan, record_completion, research_company
-alembic/           # Async SQLAlchemy migrations
-```
-
----
-
-## Cost estimate (personal use)
+## Cost (personal use)
 
 | Service | Cost |
 |---|---|
 | Fly.io (shared-cpu-1x, 256MB) | ~$0–3/mo |
-| Supabase (free tier) | $0 |
+| Supabase | $0 (free tier) |
 | Twilio WhatsApp Sandbox | $0 |
-| Anthropic API | ~$2–5/mo (~4 mocks/week + prep plans) |
-| Tavily (free tier) | $0 |
+| Anthropic API | ~$2–5/mo (researcher is the main cost) |
 | GitHub API | $0 |
 | **Total** | **~$2–8/mo** |
