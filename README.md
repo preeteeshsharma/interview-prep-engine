@@ -3,42 +3,45 @@
 A deployed Python/FastAPI service that runs your interview prep loop via WhatsApp.
 
 Three triggers:
-- **7am daily cron** — generates today's drill, commits markdown to your private `prep-vault` GitHub repo, sends a WhatsApp nudge
-- **Forwarded interview invite email** — parses company/role, classifies rounds, generates a calibrated prep plan
-- **WhatsApp commands** — `prep <company>`, `mock <round>`, `done <rating>`, `status`
+- **Conversational `prep`** — send `prep Google senior backend june 15 dsa lld` (or just `prep Google`); the engine extracts what it can, asks once for anything missing, then researches and plans
+- **7am daily cron** — sends today's drill nudge via WhatsApp
+- **WhatsApp commands** — full mock interviews, Socratic study sessions, drill tracking
 
-Multi-agent mock interviews: Interviewer (Sonnet, adversarial), Observer (Haiku, parallel rubric scoring), Coach (Sonnet, post-session critique with citation-grounded feedback). Reply `done hard` to mark a drill complete — the engine tracks weak areas and reassigns them more aggressively.
+Multi-agent mock interviews: Interviewer (Sonnet 4.6, adversarial), Observer (Haiku 4.5, parallel rubric scoring), Coach (Sonnet 4.6, post-session critique). Researcher (Sonnet 4.6 + live web search) generates cited company/role research. Tutor (Sonnet 4.6) runs Socratic `study` sessions from the research.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────┐                ┌────────────────────────────────────┐
-│ Twilio WhatsApp │ ◄── outbound ──┤                                    │
-│ Sandbox         │                │   interview-prep-engine            │
-│                 │ ──── inbound ──►   (FastAPI / Python 3.12)          │
-└─────────────────┘                │                                    │
-                                   │  Triggers                          │
-┌─────────────────┐                │   APScheduler  7am IST cron        │
-│ Mailgun inbound │ ──── POST ─────►   POST /hooks/twilio               │
-│ route           │                │   POST /hooks/inbox                │
-└─────────────────┘                │                                    │
-                                   │  Agents                            │
-┌─────────────────┐                │   Interviewer  claude-sonnet-4-6   │
-│ Anthropic API   │ ◄──────────────►   Observer     claude-haiku-4-5    │
-└─────────────────┘                │   Coach        claude-sonnet-4-6   │
-                                   │                                    │
-┌─────────────────┐                │  Tools                             │
-│ GitHub API      │ ◄── commits ───►   classify_rounds                  │
-│ (prep-vault)    │                │   generate_plan                    │
-└─────────────────┘                │   record_completion                │
-                                   │                                    │
-┌─────────────────┐                │  State                             │
-│ SQLite (volume) │ ◄── state ─────►   interviews, prep_plans           │
-└─────────────────┘                │   mock_sessions, weak_patterns     │
-                                   │   wa_window_state, idempotency     │
-                                   └────────────────────────────────────┘
+┌─────────────────┐                ┌────────────────────────────────────────┐
+│ Twilio WhatsApp │ ◄── outbound ──┤                                        │
+│ Sandbox         │                │   interview-prep-engine                │
+│                 │ ──── inbound ──►   (FastAPI / Python 3.12)              │
+└─────────────────┘                │                                        │
+                                   │  Agents                                │
+┌─────────────────┐                │   Researcher  sonnet-4-6 + web_search  │
+│ Anthropic API   │ ◄──────────────►   Interviewer sonnet-4-6 (adversarial) │
+│                 │                │   Observer    haiku-4-5  (rubric)      │
+│ web_search tool │                │   Coach       sonnet-4-6 (critique)    │
+└─────────────────┘                │   Tutor       sonnet-4-6 (Socratic)    │
+                                   │                                        │
+┌─────────────────┐                │  Skills (loaded as system prompts)     │
+│ Tavily Search   │ ◄──────────────►   interview_research.md                │
+│ (primary)       │                │   interview_prep_assistant.md          │
+└─────────────────┘                │   lld_problem_solving.md               │
+                                   │                                        │
+┌─────────────────┐                │  Tools                                 │
+│ GitHub API      │ ◄── commits ───►   parse_prep_intent  (Haiku parser)    │
+│ (prep-vault)    │                │   generate_plan                        │
+└─────────────────┘                │   record_completion                    │
+                                   │   research_company                     │
+┌─────────────────┐                │                                        │
+│ Supabase        │ ◄── state ─────►  interviews, prep_plans                │
+│ (PostgreSQL)    │                │  mock_sessions, weak_patterns          │
+└─────────────────┘                │  wa_window_state (+ pending_prep)      │
+                                   │  outbound_idempotency                  │
+                                   └────────────────────────────────────────┘
 ```
 
 ---
@@ -47,11 +50,32 @@ Multi-agent mock interviews: Interviewer (Sonnet, adversarial), Observer (Haiku,
 
 | Command | What it does |
 |---|---|
-| `prep <company>` | Generate a prep plan for a company |
+| `prep Google` | Start conversational prep — engine asks for missing details |
+| `prep Zapier senior backend june 15 dsa lld` | Full details in one message — goes straight to plan |
 | `mock lld` | Start a mock interview (dsa / lld / sysdesign / behavioral) |
+| `study` | Start a Socratic study session from latest research |
 | `done hard` | Mark current drill complete and rate difficulty |
-| `status` | List active interviews |
-| `end` | End the current mock session and get Coach feedback |
+| `status` | List active interviews with rounds and scheduled date |
+| `end` | End the current mock/study session and get Coach feedback |
+
+### Conversational `prep` flow
+
+If you omit any of role, interview date, or rounds, the engine asks once:
+
+```
+You: prep Google
+Bot: Got it. Still need:
+       • role (e.g. 'senior backend', 'L5 SWE')
+       • interview date (e.g. 'june 15')
+       • rounds (dsa / lld / sysdesign / behavioral / hiring_manager)
+
+     Reply with the missing details (I'll use defaults if you skip).
+
+You: L5 SWE, june 20, dsa lld sysdesign
+Bot: Plan for Google (L5 SWE) on 2026-06-20: ...
+```
+
+Skip the follow-up reply and the engine uses defaults (role: software engineer, days: 7, rounds: dsa/lld/sysdesign/behavioral).
 
 ---
 
@@ -63,7 +87,8 @@ Multi-agent mock interviews: Interviewer (Sonnet, adversarial), Observer (Haiku,
 - [uv](https://github.com/astral-sh/uv) — `pip install uv`
 - A [Twilio](https://www.twilio.com) account (free sandbox works)
 - An [Anthropic](https://console.anthropic.com) API key
-- A [Mailgun](https://www.mailgun.com) account (free tier works)
+- A [Supabase](https://supabase.com) project (free tier works)
+- A [Tavily](https://tavily.com) API key (free tier — used for web search in researcher)
 - A GitHub personal access token with `repo` scope
 - A **private** GitHub repo to use as your `prep-vault`
 
@@ -77,9 +102,9 @@ uv sync
 
 ### 2. Create your prep-vault repo
 
-Create a **private** GitHub repo (e.g. `yourname/prep-vault`). This is where
-the engine commits prep plans, drill completions, and mock transcripts as
-markdown — open it locally with Obsidian for a searchable knowledge base.
+Create a **private** GitHub repo (e.g. `yourname/prep-vault`). The engine commits
+prep plans and research reports as markdown — open it locally with Obsidian for a
+searchable knowledge base.
 
 ### 3. Configure environment
 
@@ -99,21 +124,21 @@ TWILIO_AUTH_TOKEN=...
 TWILIO_FROM_WHATSAPP=whatsapp:+14155238886   # Twilio sandbox number
 TWILIO_TO_WHATSAPP=whatsapp:+91...           # your WhatsApp number
 
-# Mailgun — app.mailgun.com → Sending → Domain settings → Webhooks
-MAILGUN_SIGNING_KEY=...
+# Tavily — app.tavily.com → API Keys (free tier: 1000 req/month)
+TAVILY_API_KEY=tvly-...
 
 # GitHub — Settings → Developer settings → Personal access tokens (repo scope)
 GITHUB_TOKEN=ghp_...
 GITHUB_VAULT_REPO=yourname/prep-vault
 
-# Database (default works for local dev; Railway sets this to a volume path)
-DATABASE_URL=sqlite+aiosqlite:///./data/app.db
+# Supabase — project settings → Database → Connection string (Transaction pooler)
+# Use the asyncpg format:
+DATABASE_URL=postgresql+asyncpg://postgres.[project-ref]:[password]@aws-0-[region].pooler.supabase.com:5432/postgres
 ```
 
 ### 4. Run locally
 
 ```bash
-mkdir -p data
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
 ```
@@ -126,7 +151,7 @@ Server starts on `http://localhost:8000`. Health check: `curl localhost:8000/hea
 ngrok http 8000
 ```
 
-Use the `https://xxxx.ngrok.io` URL for Twilio and Mailgun webhook configuration.
+Use the `https://xxxx.ngrok.io` URL for Twilio webhook configuration.
 
 ### 6. Connect Twilio WhatsApp Sandbox
 
@@ -135,46 +160,34 @@ Use the `https://xxxx.ngrok.io` URL for Twilio and Mailgun webhook configuration
 3. Set the inbound webhook URL to `https://xxxx.ngrok.io/hooks/twilio`
 4. Text `prep zapier` to test
 
-### 7. Configure Mailgun inbound route
+---
 
-1. Mailgun → Receiving → Create Route
-2. Match: `match_recipient("prep@yourdomain.mailgun.org")`
-3. Action: Forward to `https://xxxx.ngrok.io/hooks/inbox`
-4. Forward an interview invite email to `prep@yourdomain.mailgun.org` to test
+## Deploy to Fly.io
+
+```bash
+flyctl launch --no-deploy   # first time only
+flyctl secrets set ANTHROPIC_API_KEY=... TWILIO_AUTH_TOKEN=... # etc.
+flyctl deploy
+```
+
+The `fly.toml` runs `alembic upgrade head` as a release command before starting the server.
+After deploy: update your Twilio webhook URL to `https://interview-prep-engine.fly.dev/hooks/twilio`.
+
+**Fly.io + Twilio note:** Fly terminates TLS internally, so requests arrive as `http://`.
+Twilio signs with the public `https://` URL — the webhook handler corrects for this automatically.
 
 ---
 
-## Deploy to Railway
+## Mailgun (optional — for email-forwarded invites)
 
-```bash
-railway login
-railway init
-railway up
-```
+Mailgun free sandbox works for development. Key constraints:
 
-Set all `.env` variables as Railway environment variables. Set `DATABASE_URL`
-to use the Railway volume mount path:
+- **Authorized recipients only** — add your email in the sandbox dashboard before testing
+- **1 inbound route** — sufficient for this setup
+- **100 emails/day** — plenty for personal use
+- **24h log retention** — enough to grab Gmail verification codes
 
-```
-DATABASE_URL=sqlite+aiosqlite:////data/app.db
-```
-
-Add a persistent volume mounted at `/data` so the SQLite database survives
-redeploys.
-
-After deploy: update your Twilio and Mailgun webhook URLs to the Railway
-public URL.
-
----
-
-## Run evals
-
-```bash
-uv run python evals/run.py
-```
-
-Runs the 3-JD golden set (Zapier, Stripe, CRED) against `classify_rounds`.
-CI runs this on every push via `.github/workflows/eval.yml`.
+For production (forwarding from a real domain), upgrade to Foundation ($35/mo) or use a custom domain with Mailgun Flex.
 
 ---
 
@@ -182,16 +195,16 @@ CI runs this on every push via `.github/workflows/eval.yml`.
 
 ```
 app/
-  agents/          # Interviewer, Observer, Coach, Orchestrator
-  db/              # SQLAlchemy models, async repos
-  integrations/    # Anthropic, Twilio, GitHub clients
-  jobs/            # morning_drill cron
-  lib/             # chunker, wa_window, idempotency, logging
+  agents/          # Researcher, Interviewer, Observer, Coach, Tutor, Orchestrator
+  db/              # SQLAlchemy models (Supabase/PostgreSQL), async repos
+  integrations/    # Anthropic, Twilio, GitHub clients; search/ (Tavily + fallback)
+  jobs/            # morning_drill cron (APScheduler, 7am IST)
+  lib/             # chunker, wa_window, idempotency, json_utils, logging
   routes/          # /hooks/twilio, /hooks/inbox, /health
   schemas/         # Pydantic models for agent I/O and webhooks
-  tools/           # classify_rounds, generate_plan, record_completion
-evals/             # Golden JD fixtures + eval runner
-tests/             # Unit tests
+  skills/          # interview_research.md, interview_prep_assistant.md, lld_problem_solving.md
+  tools/           # parse_prep_intent, generate_plan, record_completion, research_company
+alembic/           # Async SQLAlchemy migrations
 ```
 
 ---
@@ -200,16 +213,10 @@ tests/             # Unit tests
 
 | Service | Cost |
 |---|---|
-| Railway Hobby | ~$0–3/mo |
+| Fly.io (shared-cpu-1x, 256MB) | ~$0–3/mo |
+| Supabase (free tier) | $0 |
 | Twilio WhatsApp Sandbox | $0 |
-| Anthropic API | ~$2–4/mo (cron + ~4 mocks/week, with prompt caching) |
+| Anthropic API | ~$2–5/mo (~4 mocks/week + prep plans) |
+| Tavily (free tier) | $0 |
 | GitHub API | $0 |
-| Mailgun (first 100 emails free) | ~$0 |
-| **Total** | **~$2–7/mo** |
-
----
-
-## Iteration log
-
-See [ITERATIONS.md](ITERATIONS.md) for the real bugs hit during development
-and the structural fixes that resolved them.
+| **Total** | **~$2–8/mo** |
