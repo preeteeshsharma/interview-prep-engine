@@ -85,3 +85,77 @@ async def list_directory(
             raise
 
     return await asyncio.to_thread(_list)
+
+
+async def load_vault_context(
+    company_slug: str,
+    round_slug: str,
+    github_token: str | None = None,
+    vault_repo: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Return (research_md, plan_md) for company/round from vault.
+
+    Latest research and latest plan are picked independently by epoch — if one
+    run produced only a plan (research failed), we still get the best of each.
+    Returns (None, None) if the directory doesn't exist.
+    """
+    token = github_token or settings.github_token
+    repo_name = vault_repo or settings.github_vault_repo
+    path = f"{company_slug}/{round_slug}"
+
+    def _epoch(filename: str) -> int:
+        try:
+            return int(filename.split("-")[0])
+        except (ValueError, IndexError):
+            return 0
+
+    def _load() -> tuple[str | None, str | None]:
+        gh = Github(token)
+        repo = gh.get_repo(repo_name)
+        try:
+            items = repo.get_contents(path)
+        except GithubException as exc:
+            if exc.status == 404:
+                return None, None
+            raise
+        if not isinstance(items, list):
+            items = [items]
+        files = {item.name: item for item in items if item.type == "file"}
+
+        research_files = sorted(
+            [n for n in files if n.endswith("-research.md")], key=_epoch, reverse=True
+        )
+        plan_files = sorted(
+            [n for n in files if n.endswith("-plan.md")], key=_epoch, reverse=True
+        )
+
+        research = files[research_files[0]].decoded_content.decode("utf-8") if research_files else None
+        plan = files[plan_files[0]].decoded_content.decode("utf-8") if plan_files else None
+        return research, plan
+
+    return await asyncio.to_thread(_load)
+
+
+async def list_vault_rounds(
+    company_slug: str,
+    github_token: str | None = None,
+    vault_repo: str | None = None,
+) -> list[str]:
+    """Return round subdirectory names under company_slug/ in vault. Returns [] if not found."""
+    token = github_token or settings.github_token
+    repo_name = vault_repo or settings.github_vault_repo
+
+    def _list() -> list[str]:
+        gh = Github(token)
+        repo = gh.get_repo(repo_name)
+        try:
+            items = repo.get_contents(company_slug)
+        except GithubException as exc:
+            if exc.status == 404:
+                return []
+            raise
+        if not isinstance(items, list):
+            items = [items]
+        return [item.name for item in items if item.type == "dir"]
+
+    return await asyncio.to_thread(_list)

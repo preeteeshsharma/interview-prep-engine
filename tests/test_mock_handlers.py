@@ -35,13 +35,35 @@ async def test_mock_requires_active_interview():
 
 @pytest.mark.asyncio
 async def test_mock_rejects_unknown_round_type():
-    result = await _handle_mock("whatsapp:+91999", ["knitting"])
+    """Unknown round arg (LLM returns it as a round) → clear error."""
+    from app.tools.parse_prep_intent import PrepIntent
+
+    mock_interview = MagicMock()
+    mock_interview.id = 1
+    mock_interview.company = "Stripe"
+    mock_interview.role = "Backend Engineer"
+
+    with patch("app.routes.webhooks.twilio.async_session_factory") as mock_factory:
+        mock_session = AsyncMock()
+        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        mock_repo = AsyncMock()
+        mock_repo.list_active.return_value = [mock_interview]
+
+        # LLM identifies "knitting" as a round name (not a company).
+        fake_intent = PrepIntent(company=None, rounds=["knitting"])
+
+        with patch("app.routes.webhooks.twilio.InterviewRepository", return_value=mock_repo), \
+             patch("app.routes.webhooks.twilio.parse_prep_intent", new=AsyncMock(return_value=fake_intent)):
+            result = await _handle_mock("whatsapp:+91999", ["knitting"])
+
     assert "Unknown round" in result
 
 
 @pytest.mark.asyncio
 async def test_mock_defaults_to_behavioral_when_no_args():
-    """No round arg → behavioral (not an error)."""
+    """No round arg → asks for round (new flow: ask once, default on reply)."""
     mock_interview = MagicMock()
     mock_interview.id = 1
     mock_interview.company = "Stripe"
@@ -55,18 +77,18 @@ async def test_mock_defaults_to_behavioral_when_no_args():
         mock_interview_repo = AsyncMock()
         mock_interview_repo.list_active.return_value = [mock_interview]
 
-        mock_session_repo = AsyncMock()
-        mock_session_obj = MagicMock()
-        mock_session_obj.id = 42
-        mock_session_repo.create.return_value = mock_session_obj
+        mock_wa_repo = AsyncMock()
+
+        from app.tools.parse_prep_intent import PrepIntent
+        fake_intent = PrepIntent(company=None, rounds=None)
 
         with patch("app.routes.webhooks.twilio.InterviewRepository", return_value=mock_interview_repo), \
-             patch("app.routes.webhooks.twilio.MockSessionRepository", return_value=mock_session_repo), \
-             patch("app.routes.webhooks.twilio._orchestrator") as mock_orch:
-            mock_orch.start = AsyncMock(return_value="Tell me about yourself.")
+             patch("app.routes.webhooks.twilio.WaWindowRepository", return_value=mock_wa_repo), \
+             patch("app.routes.webhooks.twilio.parse_prep_intent", new=AsyncMock(return_value=fake_intent)):
             result = await _handle_mock("whatsapp:+91999", [])
 
-    assert "behavioral" in result.lower() or "session" in result.lower()
+    # New flow: asks for round rather than defaulting silently
+    assert "round" in result.lower() or "behavioral" in result.lower() or "session" in result.lower()
 
 
 # ---------------------------------------------------------------------------

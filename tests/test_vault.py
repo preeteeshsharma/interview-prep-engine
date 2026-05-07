@@ -192,6 +192,7 @@ def test_epoch_sort_mixed_with_old_format_filenames():
 
 @pytest.mark.asyncio
 async def test_handle_study_returns_no_research_found_on_404(monkeypatch):
+    """When vault has no round dirs for company → returns 'No prep found'."""
     from app.routes.webhooks.twilio import _handle_study
 
     mock_interview = MagicMock()
@@ -205,28 +206,26 @@ async def test_handle_study_returns_no_research_found_on_404(monkeypatch):
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=False)
 
-    def _raise_404(*args, **kwargs):
-        from github import GithubException
-        raise GithubException(404, "Not Found")
+    from app.tools.parse_prep_intent import PrepIntent
+    fake_intent = PrepIntent(company=None, rounds=None)
 
+    # list_vault_rounds returns [] (404 case) → no rounds available
     with patch("app.routes.webhooks.twilio.async_session_factory", return_value=mock_session), \
          patch("app.routes.webhooks.twilio.InterviewRepository", return_value=mock_repo), \
-         patch("app.routes.webhooks.twilio.get_user_context", new=AsyncMock(
+         patch("app.routes.webhooks.twilio._get_ctx", new=AsyncMock(
              return_value=MagicMock(github_token="tok", vault_repo="user/vault")
          )), \
-         patch("github.Github") as mock_gh_cls:
-        mock_gh = MagicMock()
-        mock_gh_cls.return_value = mock_gh
-        mock_gh.get_repo.return_value.get_contents.side_effect = _raise_404
-
+         patch("app.routes.webhooks.twilio.parse_prep_intent", new=AsyncMock(return_value=fake_intent)), \
+         patch("app.routes.webhooks.twilio.list_vault_rounds", new=AsyncMock(return_value=[])):
         result = await _handle_study("whatsapp:+91999", [])
 
-    assert "No research found" in result
+    assert "No prep found" in result
     assert "Stripe" in result
 
 
 @pytest.mark.asyncio
 async def test_handle_study_returns_no_research_found_on_missing_candidates(monkeypatch):
+    """When vault round dir has no research/plan files → returns 'No prep found'."""
     from app.routes.webhooks.twilio import _handle_study
 
     mock_interview = MagicMock()
@@ -240,28 +239,18 @@ async def test_handle_study_returns_no_research_found_on_missing_candidates(monk
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=False)
 
-    # Company dir exists but has no *-research.md files.
-    mock_dir_item = MagicMock()
-    mock_dir_item.type = "dir"
-    mock_dir_item.path = "zapier/dsa"
+    from app.tools.parse_prep_intent import PrepIntent
+    fake_intent = PrepIntent(company=None, rounds=None)
 
-    mock_file_item = MagicMock()
-    mock_file_item.type = "file"
-    mock_file_item.name = "1778165199-plan.md"  # only plan, no research
-
-    mock_repo_obj = MagicMock()
-    mock_repo_obj.get_contents.side_effect = [
-        [mock_dir_item],        # top-level listing
-        [mock_file_item],       # round dir contents
-    ]
-
+    # list_vault_rounds returns one round, but load_vault_context finds nothing.
     with patch("app.routes.webhooks.twilio.async_session_factory", return_value=mock_session), \
          patch("app.routes.webhooks.twilio.InterviewRepository", return_value=mock_repo), \
-         patch("app.routes.webhooks.twilio.get_user_context", new=AsyncMock(
+         patch("app.routes.webhooks.twilio._get_ctx", new=AsyncMock(
              return_value=MagicMock(github_token="tok", vault_repo="user/vault")
          )), \
-         patch("github.Github") as mock_gh_cls:
-        mock_gh_cls.return_value.get_repo.return_value = mock_repo_obj
+         patch("app.routes.webhooks.twilio.parse_prep_intent", new=AsyncMock(return_value=fake_intent)), \
+         patch("app.routes.webhooks.twilio.list_vault_rounds", new=AsyncMock(return_value=["dsa"])), \
+         patch("app.routes.webhooks.twilio.load_vault_context", new=AsyncMock(return_value=(None, None))):
         result = await _handle_study("whatsapp:+91999", [])
 
-    assert "No research found" in result
+    assert "No prep found" in result

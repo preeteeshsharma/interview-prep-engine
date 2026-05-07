@@ -8,7 +8,7 @@ from fastapi.responses import Response
 from twilio.request_validator import RequestValidator
 
 from app.config import settings
-from app.integrations.github_client import commit_file
+from app.integrations.github_client import commit_file, load_vault_context, list_vault_rounds
 from app.lib.user_context import get_user_context as _get_ctx
 from sqlalchemy import select
 
@@ -243,17 +243,60 @@ async def _commit_plan_to_vault(
 
 
 async def _handle_mock(sender: str, args: list[str]) -> str:
-    round_type = args[0].lower() if args else "behavioral"
-    if round_type not in _MOCK_ROUNDS:
-        return f"Unknown round '{round_type}'. Use: dsa, lld, sysdesign, behavioral"
+    raw = " ".join(args)
+
+    # Parse company + round from args using the same LLM parser as prep.
+    intent = await parse_prep_intent(raw) if raw else PrepIntent()
+    company_hint = intent.company
+    round_hint = (intent.rounds or [None])[0]
+
+    # If round not extracted by LLM, try the first arg directly.
+    if not round_hint and args:
+        candidate = args[-1].lower()
+        if candidate in _MOCK_ROUNDS:
+            round_hint = candidate
 
     async with async_session_factory() as session:
         interviews = await InterviewRepository(session).list_active()
 
     if not interviews:
-        return "No active interview found. Forward an invite email first, or run: prep <company>"
+        return "No active interviews. Forward an invite or run: prep <company>"
 
-    interview = interviews[0]
+    # Resolve company.
+    interview = None
+    if company_hint:
+        interview = next((i for i in interviews if i.company.lower() == company_hint.lower()), None)
+    if interview is None and len(interviews) == 1:
+        interview = interviews[0]
+    if interview is None:
+        # Multiple active interviews, company ambiguous — ask once.
+        options = "\n".join(f"  • {i.company} ({i.role})" for i in interviews)
+        pending = {"_command": "mock", "round": round_hint}
+        async with async_session_factory() as session:
+            await WaWindowRepository(session).set_pending_prep(sender, pending)
+        return f"Which interview?\n{options}\n\nReply: mock <company> <round>"
+
+    # Resolve round.
+    if not round_hint:
+        pending = {"_command": "mock", "company": interview.company, "round": None}
+        async with async_session_factory() as session:
+            await WaWindowRepository(session).set_pending_prep(sender, pending)
+        return "Which round? dsa / lld / sysdesign / behavioral"
+
+    round_type = round_hint.lower()
+    if round_type not in _MOCK_ROUNDS:
+        return f"Unknown round '{round_type}'. Use: dsa, lld, sysdesign, behavioral"
+
+    return await _execute_mock(sender, interview, round_type)
+
+
+async def _execute_mock(sender: str, interview, round_type: str) -> str:
+    ctx = await _get_ctx()
+    company_slug = interview.company.lower().replace(" ", "-")
+    research, plan = await load_vault_context(
+        company_slug, round_type,
+        github_token=ctx.github_token, vault_repo=ctx.vault_repo,
+    )
 
     async with async_session_factory() as session:
         session_obj = await MockSessionRepository(session).create(
@@ -263,28 +306,81 @@ async def _handle_mock(sender: str, args: list[str]) -> str:
         session_id = session_obj.id
 
     logger.info("mock.session.created", session_id=session_id, round_type=round_type)
-
-    company = interview.company
-    role = interview.role
-    opening = await _orchestrator.start(session_id, round_type, company, role)
+    opening = await _orchestrator.start(
+        session_id, round_type, interview.company, interview.role,
+        research=research, plan=plan,
+    )
     return f"Mock started (session #{session_id}).\n\n{opening}"
 
 
-async def _handle_done(sender: str, args: list[str]) -> str:
-    rating = args[0].lower() if args else ""
-    if rating not in {"easy", "medium", "hard"}:
-        return "Usage: done easy / done medium / done hard"
+async def _handle_mock_followup(sender: str, pending: dict, body: str) -> str:
+    new_intent = await parse_prep_intent(body)
+    company_hint = pending.get("company") or (new_intent.company)
+    round_hint = pending.get("round") or ((new_intent.rounds or [None])[0])
 
-    # Find the most recent incomplete prep plan across all active interviews.
+    # Try direct round word if LLM missed it.
+    if not round_hint:
+        word = body.strip().split()[0].lower() if body.strip() else ""
+        if word in _MOCK_ROUNDS:
+            round_hint = word
+
+    async with async_session_factory() as session:
+        await WaWindowRepository(session).clear_pending_prep(sender)
+        interviews = await InterviewRepository(session).list_active()
+
+    interview = None
+    if company_hint:
+        interview = next((i for i in interviews if i.company.lower() == company_hint.lower()), None)
+    if interview is None and interviews:
+        interview = interviews[0]
+    if interview is None:
+        return "No active interviews found."
+
+    round_type = (round_hint or "behavioral").lower()
+    if round_type not in _MOCK_ROUNDS:
+        round_type = "behavioral"
+
+    return await _execute_mock(sender, interview, round_type)
+
+
+async def _handle_done(sender: str, args: list[str]) -> str:
+    # Extract rating — must be present.
+    rating = next((a.lower() for a in args if a.lower() in {"easy", "medium", "hard"}), None)
+    if not rating:
+        return "Usage: done easy / done medium / done hard\n  e.g. done google easy"
+
+    # Extract company hint from remaining args.
+    remaining = [a for a in args if a.lower() not in {"easy", "medium", "hard"}]
+    company_hint = " ".join(remaining).strip() or None
+
     async with async_session_factory() as session:
         interviews = await InterviewRepository(session).list_active()
-        if not interviews:
-            return "No active interviews found. Forward an invite email first."
 
+    if not interviews:
+        return "No active interviews found. Forward an invite or run: prep <company>"
+
+    # Resolve interview.
+    interview = None
+    if company_hint:
+        interview = next((i for i in interviews if i.company.lower() == company_hint.lower()), None)
+    if interview is None and len(interviews) == 1:
+        interview = interviews[0]
+    if interview is None:
+        options = "\n".join(f"  • {i.company} ({i.role})" for i in interviews)
+        pending = {"_command": "done", "rating": rating}
+        async with async_session_factory() as session:
+            await WaWindowRepository(session).set_pending_prep(sender, pending)
+        return f"Which interview?\n{options}\n\nReply: done <company> {rating}"
+
+    return await _execute_done(interview, rating)
+
+
+async def _execute_done(interview, rating: str) -> str:
+    async with async_session_factory() as session:
         result = await session.execute(
             select(PrepPlan)
             .where(
-                PrepPlan.interview_id.in_([i.id for i in interviews]),
+                PrepPlan.interview_id == interview.id,
                 PrepPlan.completed_at.is_(None),
                 PrepPlan.skipped.is_(False),
             )
@@ -294,9 +390,33 @@ async def _handle_done(sender: str, args: list[str]) -> str:
         plan = result.scalar_one_or_none()
 
     if not plan:
-        return "No pending drill to mark. Get a plan first: prep <company>"
+        return f"No pending drill for {interview.company}. Get a plan first: prep {interview.company}"
 
     return await record_completion(plan.id, rating)
+
+
+async def _handle_done_followup(sender: str, pending: dict, body: str) -> str:
+    async with async_session_factory() as session:
+        await WaWindowRepository(session).clear_pending_prep(sender)
+        interviews = await InterviewRepository(session).list_active()
+
+    rating = pending.get("rating", "")
+    if not rating:
+        rating = next((w.lower() for w in body.split() if w.lower() in {"easy", "medium", "hard"}), "medium")
+
+    # Remove rating word from company hint if present.
+    words = [w for w in body.split() if w.lower() not in {"easy", "medium", "hard"}]
+    company_hint = " ".join(words).strip()
+
+    interview = None
+    if company_hint:
+        interview = next((i for i in interviews if i.company.lower() == company_hint.lower()), None)
+    if interview is None and interviews:
+        interview = interviews[0]
+    if interview is None:
+        return "No active interviews found."
+
+    return await _execute_done(interview, rating)
 
 
 async def _handle_status(sender: str) -> str:
@@ -359,77 +479,82 @@ async def _handle_freeform(sender: str, body: str) -> str:
 # ---------------------------------------------------------------------------
 
 async def _handle_study(sender: str, args: list[str]) -> str:
-    """Start a Socratic study session using the latest research from vault."""
     ctx = await _get_ctx()
+    raw = " ".join(args)
 
-    # Find latest research file in vault.
+    intent = await parse_prep_intent(raw) if raw else PrepIntent()
+    company_hint = intent.company
+    round_hint = (intent.rounds or [None])[0]
+
+    # Resolve company — from args, or single active interview.
     async with async_session_factory() as session:
         interviews = await InterviewRepository(session).list_active()
-    if not interviews:
-        return "No active interview. Run 'prep <company>' first."
 
-    interview = interviews[0]
-    company_slug = interview.company.lower().replace(" ", "-")
+    company_slug = None
+    company_label = company_hint
 
-    # Find the latest *-research.md across all round subdirectories.
-    research_context = None
-    try:
-        from github import Github
-        gh_token = ctx.github_token or settings.github_token
-        repo_name = ctx.vault_repo or settings.github_vault_repo
+    if company_hint:
+        match = next((i for i in interviews if i.company.lower() == company_hint.lower()), None)
+        company_slug = company_hint.lower().replace(" ", "-")
+        company_label = match.company if match else company_hint
+    elif len(interviews) == 1:
+        company_slug = interviews[0].company.lower().replace(" ", "-")
+        company_label = interviews[0].company
+    elif interviews:
+        options = "\n".join(f"  • {i.company} ({i.role})" for i in interviews)
+        pending = {"_command": "study", "round": round_hint}
+        async with async_session_factory() as session:
+            await WaWindowRepository(session).set_pending_prep(sender, pending)
+        return f"Which interview?\n{options}\n\nReply: study <company> <round>"
+    else:
+        return "No active interviews. Run 'prep <company>' first."
 
-        def _find_latest_research() -> str | None:
-            from github import GithubException
-            gh = Github(gh_token)
-            repo = gh.get_repo(repo_name)
-            try:
-                top = repo.get_contents(company_slug)
-                if not isinstance(top, list):
-                    top = [top]
-                candidates: list[str] = []
-                for item in top:
-                    if item.type == "dir":
-                        sub = repo.get_contents(item.path)
-                        if not isinstance(sub, list):
-                            sub = [sub]
-                        for f in sub:
-                            if f.type == "file" and f.name.endswith("-research.md"):
-                                candidates.append(f.path)
-                if not candidates:
-                    return None
+    # Resolve round — from args, or list available vault rounds.
+    round_slug = round_hint.lower() if round_hint else None
 
-                def _epoch(path: str) -> int:
-                    try:
-                        return int(path.split("/")[-1].split("-")[0])
-                    except (ValueError, IndexError):
-                        return 0
+    if not round_slug:
+        available = await list_vault_rounds(
+            company_slug, github_token=ctx.github_token, vault_repo=ctx.vault_repo
+        )
+        if len(available) == 1:
+            round_slug = available[0]
+        elif available:
+            options = " / ".join(available)
+            pending = {"_command": "study", "company": company_label, "round": None}
+            async with async_session_factory() as session:
+                await WaWindowRepository(session).set_pending_prep(sender, pending)
+            return f"Which round for {company_label}? {options}\n\nReply: study {company_label.lower()} <round>"
+        else:
+            return f"No prep found for {company_label}. Run 'prep {company_label}' first."
 
-                candidates.sort(key=_epoch, reverse=True)
-                contents = repo.get_contents(candidates[0])
-                return contents.decoded_content.decode("utf-8")
-            except GithubException as exc:
-                # 404 = company dir not created yet; anything else is unexpected.
-                if exc.status != 404:
-                    logger.warning("twilio.study.github_error", status=exc.status, error=str(exc))
-                return None
+    return await _execute_study(sender, company_slug, company_label, round_slug, ctx)
 
-        import asyncio as _asyncio
-        research_context = await _asyncio.to_thread(_find_latest_research)
-    except Exception as exc:
-        logger.warning("twilio.study.research_lookup_failed", error=str(exc), exc_info=True)
 
-    if not research_context:
-        return f"No research found for {interview.company}. Run 'prep {interview.company}' first to generate it."
+async def _execute_study(sender: str, company_slug: str, company_label: str, round_slug: str, ctx) -> str:
+    research, plan = await load_vault_context(
+        company_slug, round_slug,
+        github_token=ctx.github_token, vault_repo=ctx.vault_repo,
+    )
 
-    # Start a study session (round_type="study" reuses MockSession).
+    if not research and not plan:
+        return f"No prep found for {company_label} / {round_slug}. Run 'prep {company_label} {round_slug}' first."
+
+    async with async_session_factory() as session:
+        interviews = await InterviewRepository(session).list_active()
+    match = next((i for i in interviews if i.company.lower().replace(" ", "-") == company_slug), None)
+    interview_id = match.id if match else (interviews[0].id if interviews else None)
+
+    if interview_id is None:
+        return "No active interview found. Run 'prep <company>' first."
+
     async with async_session_factory() as session:
         session_obj = await MockSessionRepository(session).create(
-            interview_id=interview.id,
+            interview_id=interview_id,
             round_type="study",
         )
         session_id = session_obj.id
 
-    opening = await _tutor.start_session(research_context)
+    opening = await _tutor.start_session(research=research, plan=plan)
 
     import json
     transcript = [{"role": "tutor", "content": opening, "turn": 0}]
@@ -440,6 +565,38 @@ async def _handle_study(sender: str, args: list[str]) -> str:
         )
 
     return f"Study session started.\n\n{opening}"
+
+
+async def _handle_study_followup(sender: str, pending: dict, body: str) -> str:
+    ctx = await _get_ctx()
+    new_intent = await parse_prep_intent(body)
+
+    company_hint = pending.get("company") or new_intent.company
+    round_hint = pending.get("round") or ((new_intent.rounds or [None])[0])
+
+    async with async_session_factory() as session:
+        await WaWindowRepository(session).clear_pending_prep(sender)
+        interviews = await InterviewRepository(session).list_active()
+
+    company_slug = None
+    company_label = company_hint or ""
+    if company_hint:
+        match = next((i for i in interviews if i.company.lower() == company_hint.lower()), None)
+        company_slug = company_hint.lower().replace(" ", "-")
+        company_label = match.company if match else company_hint
+    elif interviews:
+        company_slug = interviews[0].company.lower().replace(" ", "-")
+        company_label = interviews[0].company
+
+    if not company_slug:
+        return "No active interviews found."
+
+    round_slug = round_hint.lower() if round_hint else None
+    if not round_slug:
+        available = await list_vault_rounds(company_slug, github_token=ctx.github_token, vault_repo=ctx.vault_repo)
+        round_slug = available[0] if available else "general"
+
+    return await _execute_study(sender, company_slug, company_label, round_slug, ctx)
 
 
 async def _handle_link(sender: str, args: list[str]) -> str:
@@ -475,7 +632,15 @@ async def _route(payload: TwilioInbound) -> str:
         # Any non-command reply is treated as the follow-up answer.
         verb = body.strip().split()[0].lower() if body.strip() else ""
         if verb not in {"prep", "mock", "done", "status", "study", "link"}:
-            return await _handle_prep_followup(sender, pending, body)
+            command = pending.get("_command", "prep")
+            if command == "mock":
+                return await _handle_mock_followup(sender, pending, body)
+            elif command == "study":
+                return await _handle_study_followup(sender, pending, body)
+            elif command == "done":
+                return await _handle_done_followup(sender, pending, body)
+            else:
+                return await _handle_prep_followup(sender, pending, body)
         # User typed a new command — discard pending state.
         async with async_session_factory() as session:
             await WaWindowRepository(session).clear_pending_prep(sender)

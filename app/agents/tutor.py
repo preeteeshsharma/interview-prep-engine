@@ -12,15 +12,19 @@ _SKILL = (Path(__file__).parent.parent / "skills" / "interview_prep_assistant.md
 
 
 class Tutor:
-    async def start_session(self, research_context: str) -> str:
-        """Begin a study session. research_context is the full research report from vault.
+    async def start_session(self, research: str | None, plan: str | None) -> str:
+        """Begin a study session using research and/or plan from vault.
 
         Returns the opening message — lists classified questions and asks which to start.
         """
-        opening_prompt = (
-            f"Here is the interview research for this session:\n\n"
-            f"{research_context}"
-        )
+        parts = []
+        if research:
+            parts.append(f"## Interview Research\n\n{research}")
+        if plan:
+            parts.append(f"## Study Plan\n\n{plan}")
+        if not parts:
+            return "No prep material found. Run 'prep <company> <round>' first to generate research and a plan."
+        opening_prompt = "Here is the interview preparation material for this session:\n\n" + "\n\n".join(parts)
         return await complete(
             messages=[{"role": "user", "content": opening_prompt}],
             system=_SKILL,

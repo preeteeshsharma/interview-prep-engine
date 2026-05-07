@@ -99,10 +99,16 @@ def _transcript_to_messages(transcript: list[dict]) -> list[dict]:
 
 
 class Interviewer:
-    async def start_session(self, round_type: str, company: str, role: str) -> str:
+    async def start_session(self, round_type: str, company: str, role: str, research=None, plan=None) -> str:
         """Return the opening question for a new mock session."""
         system = _system_for(round_type)
+        context = ""
+        if research:
+            context += f"Context — questions previously asked at {company}:\n{research[:2000]}\n\n"
+        if plan:
+            context += f"Context — candidate's prep plan:\n{plan[:1000]}\n\n"
         opening_prompt = (
+            f"{context}"
             f"Start a {round_type.upper()} mock interview for a candidate applying to "
             f"{company} as a {role}. Ask your opening question. "
             "Return JSON: {\"question\": \"...\", \"follow_up_hints\": [], \"missing_justifications\": []}"

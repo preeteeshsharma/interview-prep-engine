@@ -58,9 +58,9 @@ async def _save_transcript(session_id: int, transcript: list[dict]) -> None:
 
 
 class MockOrchestrator:
-    async def start(self, session_id: int, round_type: str, company: str, role: str) -> str:
+    async def start(self, session_id: int, round_type: str, company: str, role: str, research=None, plan=None) -> str:
         """Called once when a mock session begins. Returns the opening question."""
-        opening = await _interviewer.start_session(round_type, company, role)
+        opening = await _interviewer.start_session(round_type, company, role, research=research, plan=plan)
         transcript = [{"role": "interviewer", "content": opening, "turn": 0}]
         await _save_transcript(session_id, transcript)
         logger.info("orchestrator.session.started", session_id=session_id, round_type=round_type)
