@@ -139,7 +139,8 @@ async def _bg_pipeline(payload: MailgunInbound) -> None:
 
 @router.post("/hooks/inbox")
 async def inbox_webhook(request: Request) -> dict[str, str]:
-    body = await request.json()
+    form = await request.form()
+    body = dict(form)
 
     timestamp = body.get("timestamp", "")
     token = body.get("token", "")
