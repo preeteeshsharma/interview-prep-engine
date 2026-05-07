@@ -154,10 +154,12 @@ async def _execute_prep(sender: str, intent: PrepIntent) -> str:
         interviews = await InterviewRepository(session).list_active()
         match = next((i for i in interviews if i.company.lower() == company.lower()), None)
 
+    round_label = (final.round_labels or [None])[0]
+
     if match:
         effective_role = match.role if match.role != "Unknown" else role
         rounds = match.round_types
-        research = await run_research(match.company, effective_role)
+        research = await run_research(match.company, effective_role, round_label=round_label)
         plan_md = await generate_plan(
             interview_id=match.id,
             company=match.company,
@@ -182,7 +184,7 @@ async def _execute_prep(sender: str, intent: PrepIntent) -> str:
             scheduled_for=scheduled_for,
         )
 
-    research = await run_research(company, role)
+    research = await run_research(company, role, round_label=round_label)
     plan_md = await generate_plan(
         interview_id=interview.id,
         company=company,

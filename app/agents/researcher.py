@@ -12,14 +12,25 @@ _SKILL = (Path(__file__).parent.parent / "skills" / "interview_research.md").rea
 _WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search"}
 
 
-async def research(company: str, role: str, round_type: str | None = None) -> str:
+async def research(
+    company: str,
+    role: str,
+    round_type: str | None = None,
+    round_label: str | None = None,
+) -> str:
     """Run interview-research skill with live web search.
 
     Returns a fully sourced, cited research report in the skill's output format.
     round_type=None → full process research; round_type="dsa" → questions-mode for that round.
+    round_label: the original round name from the invite (e.g. "Coding Ability and Problem Solving")
+                 — used in addition to the canonical type for better search coverage.
     """
     if round_type:
-        query = f"Research {company} {role} {round_type} interview questions — questions mode."
+        label = round_label or round_type
+        query = (
+            f"Research {company} {role} interview questions — questions mode. "
+            f"The round is called '{label}' (canonical type: {round_type})."
+        )
     else:
         query = f"Research the {company} {role} interview process — process mode."
 

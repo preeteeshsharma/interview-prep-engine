@@ -15,23 +15,37 @@ logger = get_logger(__name__)
 
 _VALID_ROUNDS = set(get_args(RoundType))
 
-_SYSTEM = f"""Today is {{today}}.
+_SYSTEM = """Today is {today}.
 
 Extract interview prep details from the user message. Return ONLY valid JSON:
-{{
+{
   "company": "<company name or null>",
   "role": "<role/level or null>",
   "interview_date": "<YYYY-MM-DD or null>",
   "days_until_interview": <integer or null>,
-  "rounds": [<list from: dsa, lld, sysdesign, behavioral, hiring_manager> or null]
-}}
+  "rounds": [<canonical list — see mapping below> or null],
+  "round_labels": [<original round names as written by user> or null]
+}
+
+Round mapping — map any mention to the canonical type:
+- dsa: "dsa", "coding", "algorithms", "data structures", "problem solving",
+        "coding ability", "coding ability and problem solving", "leetcode",
+        "technical screen", "coding round", "coding interview"
+- lld: "lld", "low level design", "object oriented design", "oo design",
+        "machine coding", "object design"
+- sysdesign: "sysdesign", "system design", "hld", "high level design",
+              "architecture", "design round"
+- behavioral: "behavioral", "behavioural", "values", "hr round", "culture fit",
+               "people skills", "bar raiser"
+- hiring_manager: "hiring manager", "hm round", "manager round", "leadership round"
 
 Rules:
 - company: proper noun, first clear entity mentioned
 - role: job title/level (e.g. "senior backend engineer", "L5 SWE", "software engineer")
 - interview_date: parse natural dates like "june 15", "15th june", "next monday" relative to today
 - days_until_interview: compute from today to interview_date if date is given, else null
-- rounds: only include if explicitly mentioned; null if not mentioned
+- rounds: canonical types only, using the mapping above; null if no round mentioned
+- round_labels: the original words the user used to describe the rounds (e.g. "Coding Ability and Problem Solving"); null if no round mentioned
 - Return null for any field not mentioned or unclear
 """
 
@@ -43,6 +57,7 @@ class PrepIntent:
     interview_date: str | None = None
     days_until_interview: int | None = None
     rounds: list[str] | None = None
+    round_labels: list[str] | None = None  # original round names from the invite
 
     def missing(self) -> list[str]:
         gaps = []
@@ -61,6 +76,7 @@ class PrepIntent:
             interview_date=self.interview_date,
             days_until_interview=self.days_until_interview or 7,
             rounds=self.rounds or ["dsa", "lld", "sysdesign", "behavioral"],
+            round_labels=self.round_labels,
         )
 
     def merge(self, other: "PrepIntent") -> "PrepIntent":
@@ -71,6 +87,7 @@ class PrepIntent:
             interview_date=self.interview_date or other.interview_date,
             days_until_interview=self.days_until_interview or other.days_until_interview,
             rounds=self.rounds or other.rounds,
+            round_labels=self.round_labels or other.round_labels,
         )
 
     def to_dict(self) -> dict:
@@ -80,6 +97,7 @@ class PrepIntent:
             "interview_date": self.interview_date,
             "days_until_interview": self.days_until_interview,
             "rounds": self.rounds,
+            "round_labels": self.round_labels,
         }
 
     @classmethod
@@ -90,6 +108,7 @@ class PrepIntent:
             interview_date=d.get("interview_date"),
             days_until_interview=d.get("days_until_interview"),
             rounds=d.get("rounds"),
+            round_labels=d.get("round_labels"),
         )
 
 
@@ -113,6 +132,7 @@ async def parse_prep_intent(message: str) -> PrepIntent:
             interview_date=data.get("interview_date"),
             days_until_interview=data.get("days_until_interview"),
             rounds=rounds or None,
+            round_labels=data.get("round_labels") or None,
         )
     except Exception as exc:
         logger.warning("parse_prep_intent.failed", error=str(exc), message=message, exc_info=True)
