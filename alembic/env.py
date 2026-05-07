@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -10,6 +11,11 @@ from app.db.models import Base
 
 # Alembic Config object — gives access to values in alembic.ini.
 config = context.config
+
+# Override sqlalchemy.url from environment so alembic.ini doesn't store credentials.
+db_url = os.environ.get("DATABASE_URL")
+if db_url:
+    config.set_main_option("sqlalchemy.url", db_url)
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:

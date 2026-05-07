@@ -76,6 +76,7 @@ class WaWindowState(Base):
     last_template_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    pending_prep: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class OutboundIdempotency(Base):

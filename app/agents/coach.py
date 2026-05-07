@@ -5,6 +5,7 @@ import json
 from pydantic import ValidationError
 
 from app.integrations.anthropic_client import complete
+from app.lib.json_utils import strip_fences
 from app.lib.logging import get_logger
 from app.schemas.agent_io import Critique, CritiqueEntry, RubricScore
 
@@ -58,7 +59,7 @@ class Coach:
                 max_tokens=1024,
             )
             try:
-                parsed = json.loads(raw.strip())
+                parsed = json.loads(strip_fences(raw))
                 entries_raw = parsed.get("entries", [])
                 # Validate every quote_offset is a real transcript index.
                 valid_entries = []

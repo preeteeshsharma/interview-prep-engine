@@ -42,3 +42,21 @@ async def commit_file(
         return result["commit"].sha
 
     return await asyncio.to_thread(_commit)
+
+
+async def read_file(
+    path: str,
+    github_token: str | None = None,
+    vault_repo: str | None = None,
+) -> str:
+    """Read a file from the vault repo. Raises GithubException(404) if not found."""
+    token = github_token or settings.github_token
+    repo_name = vault_repo or settings.github_vault_repo
+
+    def _read() -> str:
+        gh = Github(token)
+        repo = gh.get_repo(repo_name)
+        contents = repo.get_contents(path)
+        return contents.decoded_content.decode("utf-8")
+
+    return await asyncio.to_thread(_read)

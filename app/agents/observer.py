@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from app.integrations.anthropic_client import complete
+from app.lib.json_utils import strip_fences
 from app.lib.logging import get_logger
 from app.schemas.agent_io import RubricScore
 
@@ -47,7 +48,7 @@ class Observer:
             max_tokens=128,
         )
         try:
-            return RubricScore.model_validate_json(raw.strip())
+            return RubricScore.model_validate_json(strip_fences(raw))
         except Exception as exc:
             logger.warning("observer.parse_failed", error=str(exc), raw=raw[:200], exc_info=True)
             return RubricScore(depth=3, clarity=3, edge_cases=3, time_management=3, requirements=3)

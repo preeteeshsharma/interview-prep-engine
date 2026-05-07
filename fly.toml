@@ -1,6 +1,5 @@
-[app]
-name = "interview-prep-engine"
-primary_region = "sin"  # Singapore — closest to IST
+app = "interview-prep-engine"
+primary_region = "sin"
 
 [build]
 dockerfile = "Dockerfile"

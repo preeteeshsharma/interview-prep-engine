@@ -43,3 +43,24 @@ class WaWindowRepository:
         )
         state = result.scalar_one_or_none()
         return is_within_24h(state.last_inbound_at if state else None)
+
+    async def get_pending_prep(self, recipient_e164: str) -> dict | None:
+        result = await self._session.execute(
+            select(WaWindowState).where(WaWindowState.recipient_e164 == recipient_e164)
+        )
+        state = result.scalar_one_or_none()
+        return state.pending_prep if state else None
+
+    async def set_pending_prep(self, recipient_e164: str, intent_dict: dict) -> None:
+        state = await self._get_or_create(recipient_e164)
+        state.pending_prep = intent_dict
+        await self._session.commit()
+
+    async def clear_pending_prep(self, recipient_e164: str) -> None:
+        result = await self._session.execute(
+            select(WaWindowState).where(WaWindowState.recipient_e164 == recipient_e164)
+        )
+        state = result.scalar_one_or_none()
+        if state:
+            state.pending_prep = None
+            await self._session.commit()

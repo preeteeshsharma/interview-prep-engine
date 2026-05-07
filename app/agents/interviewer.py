@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from app.integrations.anthropic_client import complete
+from app.lib.json_utils import strip_fences
 from app.lib.logging import get_logger
 from app.schemas.agent_io import TurnOutput
+
+_LLD_SKILL = (Path(__file__).parent.parent / "skills" / "lld_problem_solving.md").read_text()
 
 logger = get_logger(__name__)
 
@@ -30,19 +34,16 @@ _ROUND_PROMPTS: dict[str, str] = {
     "lld": f"""{_BASE_RULES}
 
 Round type: Low-Level Design (OO Design).
-Drive the candidate through the 5-phase HelloInterview framework:
-  Phase 1 — Requirements (~5 min): make them restate, clarify, list IN/OUT scope.
-  Phase 2 — Data models (~3 min): push for records/value-objects for immutable data,
-    typed wrappers to prevent primitive obsession.
-  Phase 3 — Class & interface design (~15 min): demand they NAME the pattern before
-    writing any class (State, Strategy, Observer, Repository, Factory). Check SOLID:
-    SRP (one reason to change?), OCP (new behaviour without touching existing code?),
-    DIP (high-level classes depend on abstractions?). Make illegal states unrepresentable —
-    sealed interfaces or discriminated unions.
-  Phase 4 — Implementation (~10 min): happy path → edge cases → trace a concrete scenario.
-  Phase 5 — Extensibility (~5 min): one new requirement; they point to the single class
-    that changes and nothing else.
-State vs Strategy trap: if they confuse these, probe — "who controls the switch?".
+You are enforcing the following framework turn-by-turn. Do not let the candidate skip phases.
+
+{_LLD_SKILL}
+
+Additionally, respond ONLY with a JSON object matching this schema (no other text):
+  {{
+    "question": "<your next question or prompt>",
+    "follow_up_hints": ["<internal hint — NOT shown to candidate>"],
+    "missing_justifications": ["<thing candidate hasn't addressed yet>"]
+  }}
 """,
     "dsa": f"""{_BASE_RULES}
 
@@ -113,11 +114,11 @@ class Interviewer:
             max_tokens=512,
         )
         try:
-            parsed = TurnOutput.model_validate_json(raw.strip())
+            parsed = TurnOutput.model_validate_json(strip_fences(raw))
             return parsed.question
         except Exception as exc:
             logger.warning("interviewer.start_session.parse_failed", error=str(exc), raw=raw[:200], exc_info=True)
-            return raw.strip()
+            return strip_fences(raw)
 
     async def next_turn(self, transcript: list[dict], round_type: str) -> TurnOutput:
         """Given the current transcript (already includes the candidate's latest turn), return next turn."""
@@ -131,11 +132,11 @@ class Interviewer:
             max_tokens=512,
         )
         try:
-            return TurnOutput.model_validate_json(raw.strip())
+            return TurnOutput.model_validate_json(strip_fences(raw))
         except Exception as exc:
             logger.warning("interviewer.parse_failed", error=str(exc), raw=raw[:200], exc_info=True)
             return TurnOutput(
-                question=raw.strip(),
+                question=strip_fences(raw),
                 follow_up_hints=[],
                 missing_justifications=[],
             )

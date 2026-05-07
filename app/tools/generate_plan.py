@@ -105,6 +105,7 @@ async def generate_plan(
     weak_patterns: list[str] | None = None,
     exclude_recent: list[str] | None = None,
     days_until_interview: int = 7,
+    research_context: str = "",
 ) -> str:
     """Generate a markdown prep plan and return it as a string."""
     weak_patterns = weak_patterns or []
@@ -112,6 +113,12 @@ async def generate_plan(
     interview_date = (date.today() + timedelta(days=days_until_interview)).isoformat()
 
     weak_section = "\n".join(f"- {p}" for p in weak_patterns) if weak_patterns else "None identified yet."
+
+    research_section = (
+        f"\n\n## Live research — real interview reports\n\n{research_context}"
+        if research_context
+        else ""
+    )
 
     user_msg = f"""Generate a prep plan for:
 
@@ -123,14 +130,14 @@ Days until interview: {days_until_interview} (interview date: {interview_date})
 Today: {today}
 
 Weak patterns to prioritise:
-{weak_section}
+{weak_section}{research_section}
 """
 
     plan_md = await complete(
         messages=[{"role": "user", "content": user_msg}],
         system=_SYSTEM,
         model="claude-sonnet-4-6",
-        max_tokens=2048,
+        max_tokens=3000,
     )
 
     logger.info("generate_plan.done", interview_id=interview_id, company=company, rounds=round_types)
