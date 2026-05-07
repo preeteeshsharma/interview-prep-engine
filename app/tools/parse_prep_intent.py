@@ -49,8 +49,10 @@ _ROUND_ALIAS_MAP: list[tuple[str, str]] = [
 
 def _map_label_to_round(label: str) -> str | None:
     """Map a free-form round label to a canonical RoundType."""
+    # Check original casing first (handles "DSA", "LLD", "sysdesign" passed directly).
+    if label in _VALID_ROUNDS:
+        return label
     lower = label.lower()
-    # Exact canonical match first
     if lower in _VALID_ROUNDS:
         return lower
     # Substring alias matching (longest alias wins via list order)

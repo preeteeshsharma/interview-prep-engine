@@ -514,7 +514,8 @@ async def test_facade_uses_gemini_as_primary(monkeypatch):
     monkeypatch.setattr(facade, "_gemini", mock_gemini)
     monkeypatch.setattr(facade, "_anthropic", mock_anthropic)
 
-    result = await facade.complete([{"role": "user", "content": "hi"}], "sys")
+    with patch("app.integrations.llm_client.get_config", new=AsyncMock(return_value="gemini")):
+        result = await facade.complete([{"role": "user", "content": "hi"}], "sys")
 
     assert result == "gemini response"
     mock_gemini.complete.assert_awaited_once()
@@ -533,7 +534,8 @@ async def test_facade_falls_back_to_anthropic_when_gemini_fails(monkeypatch):
     monkeypatch.setattr(facade, "_gemini", mock_gemini)
     monkeypatch.setattr(facade, "_anthropic", mock_anthropic)
 
-    result = await facade.complete([{"role": "user", "content": "hi"}], "sys")
+    with patch("app.integrations.llm_client.get_config", new=AsyncMock(return_value="gemini")):
+        result = await facade.complete([{"role": "user", "content": "hi"}], "sys")
 
     assert result == "anthropic fallback"
     mock_anthropic.complete.assert_awaited_once()
@@ -549,7 +551,8 @@ async def test_facade_uses_only_anthropic_when_gemini_not_configured(monkeypatch
     monkeypatch.setattr(facade, "_gemini", None)  # no Gemini key configured
     monkeypatch.setattr(facade, "_anthropic", mock_anthropic)
 
-    result = await facade.complete([{"role": "user", "content": "hi"}], "sys")
+    with patch("app.integrations.llm_client.get_config", new=AsyncMock(return_value="anthropic")):
+        result = await facade.complete([{"role": "user", "content": "hi"}], "sys")
 
     assert result == "anthropic only"
     mock_anthropic.complete.assert_awaited_once()
@@ -567,11 +570,12 @@ async def test_facade_complete_with_tools_falls_back_on_gemini_error(monkeypatch
     monkeypatch.setattr(facade, "_gemini", mock_gemini)
     monkeypatch.setattr(facade, "_anthropic", mock_anthropic)
 
-    result = await facade.complete_with_tools(
-        [{"role": "user", "content": "research"}],
-        "sys",
-        [{"type": "web_search_20250305", "name": "web_search"}],
-    )
+    with patch("app.integrations.llm_client.get_config", new=AsyncMock(return_value="gemini")):
+        result = await facade.complete_with_tools(
+            [{"role": "user", "content": "research"}],
+            "sys",
+            [{"type": "web_search_20250305", "name": "web_search"}],
+        )
 
     assert result == "anthropic tools result"
     mock_anthropic.complete_with_tools.assert_awaited_once()
