@@ -95,7 +95,7 @@ class PrepIntent:
 
 async def parse_prep_intent(message: str) -> PrepIntent:
     """Use Claude to extract structured prep intent from a natural language message."""
-    system = _SYSTEM.format(today=date.today().isoformat())
+    system = _SYSTEM.replace("{today}", date.today().isoformat())
     try:
         raw = await complete(
             messages=[{"role": "user", "content": message}],
