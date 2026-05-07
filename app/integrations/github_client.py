@@ -60,3 +60,28 @@ async def read_file(
         return contents.decoded_content.decode("utf-8")
 
     return await asyncio.to_thread(_read)
+
+
+async def list_directory(
+    path: str,
+    github_token: str | None = None,
+    vault_repo: str | None = None,
+) -> list[str]:
+    """List file paths in a directory (non-recursive). Returns [] if path doesn't exist."""
+    token = github_token or settings.github_token
+    repo_name = vault_repo or settings.github_vault_repo
+
+    def _list() -> list[str]:
+        gh = Github(token)
+        repo = gh.get_repo(repo_name)
+        try:
+            items = repo.get_contents(path)
+            if not isinstance(items, list):
+                items = [items]
+            return [item.path for item in items if item.type == "file"]
+        except GithubException as exc:
+            if exc.status == 404:
+                return []
+            raise
+
+    return await asyncio.to_thread(_list)

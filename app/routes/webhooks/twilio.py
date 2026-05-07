@@ -220,16 +220,22 @@ async def _commit_plan_to_vault(
         company_slug = company.lower().replace(" ", "-")
         round_slug = (round_label or "general").lower().replace(" ", "-")
         epoch = int(_time.time())
-        combined = plan_md
-        if research:
-            combined += f"\n\n---\n\n## Research & Sources\n\n{research}"
+        base = f"{company_slug}/{round_slug}/{epoch}"
         await commit_file(
-            path=f"{company_slug}/{round_slug}/{epoch}.md",
-            content=combined,
+            path=f"{base}-plan.md",
+            content=plan_md,
             message=f"plan: {company} — {round_label or 'general'} #{interview_id}",
             github_token=ctx.github_token,
             vault_repo=ctx.vault_repo,
         )
+        if research:
+            await commit_file(
+                path=f"{base}-research.md",
+                content=research,
+                message=f"research: {company} — {round_label or 'general'} #{interview_id}",
+                github_token=ctx.github_token,
+                vault_repo=ctx.vault_repo,
+            )
     except Exception as exc:
         logger.warning("twilio.vault_commit_failed", interview_id=interview_id, error=str(exc), exc_info=True)
 
@@ -361,16 +367,47 @@ async def _handle_study(sender: str, args: list[str]) -> str:
         return "No active interview. Run 'prep <company>' first."
 
     interview = interviews[0]
-    slug = interview.company.lower().replace(" ", "-")
-    research_path = f"research/research-{interview.id}-{slug}.md"
+    company_slug = interview.company.lower().replace(" ", "-")
 
+    # Find the latest *-research.md across all round subdirectories.
+    research_context = None
     try:
-        research_context = await read_file(
-            path=research_path,
-            github_token=ctx.github_token,
-            vault_repo=ctx.vault_repo,
-        )
+        from github import Github
+        gh_token = ctx.github_token or settings.github_token
+        repo_name = ctx.vault_repo or settings.github_vault_repo
+
+        def _find_latest_research() -> str | None:
+            from github import GithubException
+            gh = Github(gh_token)
+            repo = gh.get_repo(repo_name)
+            try:
+                top = repo.get_contents(company_slug)
+                if not isinstance(top, list):
+                    top = [top]
+                candidates: list[str] = []
+                for item in top:
+                    if item.type == "dir":
+                        sub = repo.get_contents(item.path)
+                        if not isinstance(sub, list):
+                            sub = [sub]
+                        for f in sub:
+                            if f.type == "file" and f.name.endswith("-research.md"):
+                                candidates.append(f.path)
+                if not candidates:
+                    return None
+                # Epoch is the numeric prefix — pick the largest (most recent).
+                candidates.sort(key=lambda p: int(p.split("/")[-1].split("-")[0]), reverse=True)
+                contents = repo.get_contents(candidates[0])
+                return contents.decoded_content.decode("utf-8")
+            except GithubException:
+                return None
+
+        import asyncio as _asyncio
+        research_context = await _asyncio.to_thread(_find_latest_research)
     except Exception:
+        pass
+
+    if not research_context:
         return f"No research found for {interview.company}. Run 'prep {interview.company}' first to generate it."
 
     # Start a study session (round_type="study" reuses MockSession).
