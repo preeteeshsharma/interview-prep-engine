@@ -175,7 +175,7 @@ async def _execute_prep(sender: str, intent: PrepIntent) -> str:
                 plan_md=plan_md,
                 time_budget_min=120,
             )
-        await _commit_plan_to_vault(match.id, match.company, plan_md, research)
+        await _commit_plan_to_vault(match.id, match.company, plan_md, research, round_label=round_label or single_round_type)
         return f"Researching & planning {match.company} ({effective_role}):\n\n{plan_md[:1200]}…\n\n(Full plan + sources in prep-vault)"
 
     async with async_session_factory() as session:
@@ -202,24 +202,31 @@ async def _execute_prep(sender: str, intent: PrepIntent) -> str:
             time_budget_min=120,
         )
 
-    await _commit_plan_to_vault(interview.id, company, plan_md, research)
+    await _commit_plan_to_vault(interview.id, company, plan_md, research, round_label=round_label or single_round_type)
     date_str = f" on {final.interview_date}" if final.interview_date else ""
     return f"Plan for {company} ({role}){date_str}:\n\n{plan_md[:1200]}…\n\n(Full plan + sources in prep-vault)"
 
 
-async def _commit_plan_to_vault(interview_id: int, company: str, plan_md: str, research: str = "") -> None:
+async def _commit_plan_to_vault(
+    interview_id: int,
+    company: str,
+    plan_md: str,
+    research: str = "",
+    round_label: str | None = None,
+) -> None:
+    import time as _time
     try:
         ctx = await _get_ctx()
-        slug = company.lower().replace(" ", "-")
-        # Append research (with source links) directly to the plan file so links
-        # are visible without navigating to a second file.
+        company_slug = company.lower().replace(" ", "-")
+        round_slug = (round_label or "general").lower().replace(" ", "-")
+        epoch = int(_time.time())
         combined = plan_md
         if research:
             combined += f"\n\n---\n\n## Research & Sources\n\n{research}"
         await commit_file(
-            path=f"plans/plan-{interview_id}-{slug}.md",
+            path=f"{company_slug}/{round_slug}/{epoch}.md",
             content=combined,
-            message=f"plan: {company} interview #{interview_id}",
+            message=f"plan: {company} — {round_label or 'general'} #{interview_id}",
             github_token=ctx.github_token,
             vault_repo=ctx.vault_repo,
         )

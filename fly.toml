@@ -20,6 +20,7 @@ timeout = "5s"
 
 [env]
 PORT = "8000"
+GOOGLE_CLOUD_LOCATION = "us-central1"
 
 [[vm]]
 size = "shared-cpu-1x"
