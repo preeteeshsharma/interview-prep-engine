@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import re
+import json
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from twilio.request_validator import RequestValidator
 
 from app.config import settings
+from sqlalchemy import select
+
+from app.db.models import MockSession
 from app.db.repos.interviews import InterviewRepository
 from app.db.repos.mock_sessions import MockSessionRepository
 from app.db.repos.prep_plans import PrepPlanRepository
@@ -17,8 +20,11 @@ from app.integrations.twilio_client import send_whatsapp
 from app.lib.chunker import chunk_message
 from app.lib.logging import get_logger
 from app.schemas.webhooks import TwilioInbound
+from app.agents.orchestrator import MockOrchestrator
 from app.tools.generate_plan import generate_plan
 from app.tools.record_completion import record_completion
+
+_orchestrator = MockOrchestrator()
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -141,11 +147,11 @@ async def _handle_mock(sender: str, args: list[str]) -> str:
         session_id = session_obj.id
 
     logger.info("mock.session.created", session_id=session_id, round_type=round_type)
-    # Actual interviewer agent wired in Block 4. Return a placeholder opening.
-    return (
-        f"Starting {round_type.upper()} mock (session #{session_id}).\n\n"
-        "Interviewer agent coming in Block 4. Reply anything to continue."
-    )
+
+    company = interviews[0].company if interviews else "the company"
+    role = interviews[0].role if interviews else "Software Engineer"
+    opening = await _orchestrator.start(session_id, round_type, company, role)
+    return f"Mock started (session #{session_id}).\n\n{opening}"
 
 
 async def _handle_done(sender: str, args: list[str]) -> str:
@@ -159,7 +165,6 @@ async def _handle_done(sender: str, args: list[str]) -> str:
         if not interviews:
             return "No active interviews found. Forward an invite email first."
 
-        from sqlalchemy import select
         from app.db.models import PrepPlan
         result = await session.execute(
             select(PrepPlan)
@@ -188,7 +193,6 @@ async def _handle_status(sender: str) -> str:
 
     lines = ["Active interviews:"]
     for i in interviews:
-        import json
         rounds = ", ".join(json.loads(i.round_types))
         scheduled = i.scheduled_for.strftime("%b %d") if i.scheduled_for else "TBD"
         lines.append(f"  • {i.company} — {i.role} | {rounds} | {scheduled}")
@@ -196,8 +200,23 @@ async def _handle_status(sender: str) -> str:
 
 
 async def _handle_freeform(sender: str, body: str) -> str:
-    # Block 4 will route this to the active MockSession via orchestrator.
-    return "Mock turn routing coming in Block 4. Start a session with: mock <round>"
+    """Route to the active MockSession, or end it if the user says 'end'."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(MockSession)
+            .where(MockSession.ended_at.is_(None))
+            .order_by(MockSession.started_at.desc())
+            .limit(1)
+        )
+        active = result.scalar_one_or_none()
+
+    if not active:
+        return _HELP
+
+    if body.strip().lower() in {"end", "end mock", "stop", "quit"}:
+        return await _orchestrator.end_session(active.id)
+
+    return await _orchestrator.run_turn(active.id, body)
 
 
 # ---------------------------------------------------------------------------
