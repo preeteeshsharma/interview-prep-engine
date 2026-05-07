@@ -12,6 +12,8 @@ client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 _MAX_RETRIES = 3
 _RETRY_BACKOFF_BASE = 2
 _RETRYABLE_STATUSES = {429, 500, 502, 529}
+# 429 is a per-minute rate limit — short backoff is useless; wait at least 60s.
+_RATE_LIMIT_WAIT = 65
 
 
 async def complete_with_tools(
@@ -38,7 +40,7 @@ async def complete_with_tools(
             status = getattr(exc, "status_code", None)
             retryable = isinstance(exc, (APIConnectionError, APITimeoutError)) or status in _RETRYABLE_STATUSES
             if retryable and attempt < _MAX_RETRIES - 1:
-                wait = _RETRY_BACKOFF_BASE ** (attempt + 1)
+                wait = _RATE_LIMIT_WAIT if status == 429 else _RETRY_BACKOFF_BASE ** (attempt + 1)
                 logger.warning("anthropic.retrying", attempt=attempt + 1, wait_seconds=wait, error=str(exc))
                 await asyncio.sleep(wait)
                 continue
@@ -69,7 +71,7 @@ async def complete(
             status = getattr(exc, "status_code", None)
             retryable = isinstance(exc, (APIConnectionError, APITimeoutError)) or status in _RETRYABLE_STATUSES
             if retryable and attempt < _MAX_RETRIES - 1:
-                wait = _RETRY_BACKOFF_BASE ** (attempt + 1)  # 2s, 4s
+                wait = _RATE_LIMIT_WAIT if status == 429 else _RETRY_BACKOFF_BASE ** (attempt + 1)
                 logger.warning(
                     "anthropic.retrying",
                     attempt=attempt + 1,

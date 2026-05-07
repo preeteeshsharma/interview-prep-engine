@@ -155,11 +155,13 @@ async def _execute_prep(sender: str, intent: PrepIntent) -> str:
         match = next((i for i in interviews if i.company.lower() == company.lower()), None)
 
     round_label = (final.round_labels or [None])[0]
+    # Use questions mode when there's exactly one round — gives targeted Q&A research.
+    single_round_type = round_types[0] if len(round_types) == 1 else None
 
     if match:
         effective_role = match.role if match.role != "Unknown" else role
         rounds = match.round_types
-        research = await run_research(match.company, effective_role, round_label=round_label)
+        research = await run_research(match.company, effective_role, round_type=single_round_type, round_label=round_label)
         plan_md = await generate_plan(
             interview_id=match.id,
             company=match.company,
@@ -184,7 +186,7 @@ async def _execute_prep(sender: str, intent: PrepIntent) -> str:
             scheduled_for=scheduled_for,
         )
 
-    research = await run_research(company, role, round_label=round_label)
+    research = await run_research(company, role, round_type=single_round_type, round_label=round_label)
     plan_md = await generate_plan(
         interview_id=interview.id,
         company=company,

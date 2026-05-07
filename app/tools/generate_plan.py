@@ -114,8 +114,10 @@ async def generate_plan(
 
     weak_section = "\n".join(f"- {p}" for p in weak_patterns) if weak_patterns else "None identified yet."
 
+    # Cap research to ~4000 chars to stay within token rate limits.
+    research_trimmed = research_context[:4000] + ("…" if len(research_context) > 4000 else "")
     research_section = (
-        f"\n\n## Live research — real interview reports\n\n{research_context}"
+        f"\n\n## Live research — real interview reports\n\n{research_trimmed}"
         f"\n\n**Important:** If the research above contains specific questions asked at "
         f"{company}, use those exact questions as drill material for the relevant rounds. "
         f"Do not substitute generic problems when real questions are available."
