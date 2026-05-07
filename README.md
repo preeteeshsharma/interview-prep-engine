@@ -30,6 +30,8 @@ When a field is ambiguous (multiple active interviews, or missing company/round)
 
 **`study`** — Socratic tutoring session using vault context. The tutor classifies each question (LeetCode / local build / bug squash) and gives hints on demand, never full solutions.
 
+**Email forwarding** — forward an interview invite to your Mailgun inbound address. The bot parses company and role, classifies rounds from the JD, creates Interview rows, generates a plan, and commits it to the vault — same as `prep` but triggered by email.
+
 **Morning cron** — runs at 7am IST. Sends today's drill plan over WhatsApp, skips yesterday's uncompleted plan, bumps weak pattern weights for skipped drills.
 
 ---
@@ -47,7 +49,7 @@ Switch providers at runtime via the `app_config` table in Supabase — no redepl
 
 ## Setup
 
-**Prerequisites:** Python 3.12+, [uv](https://github.com/astral-sh/uv), Twilio account, Anthropic API key, Supabase project, GitHub token + private vault repo.
+**Prerequisites:** Python 3.12+, [uv](https://github.com/astral-sh/uv), Twilio account, Mailgun account, Anthropic API key, Supabase project, GitHub token + private vault repo.
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
@@ -56,6 +58,8 @@ TWILIO_ACCOUNT_SID=AC...
 TWILIO_AUTH_TOKEN=...
 TWILIO_FROM_WHATSAPP=whatsapp:+14155238886
 TWILIO_TO_WHATSAPP=whatsapp:+91...
+
+MAILGUN_SIGNING_KEY=key-...
 
 GITHUB_TOKEN=ghp_...
 GITHUB_VAULT_REPO=yourname/prep-vault
@@ -68,6 +72,8 @@ GOOGLE_CLOUD_PROJECT=your-gcp-project
 GOOGLE_CLOUD_LOCATION=us-central1
 VERTEX_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
 ```
+
+Set Mailgun inbound routing to forward to `https://interview-prep-engine.fly.dev/hooks/inbox`.
 
 **Run locally:**
 
@@ -95,6 +101,7 @@ flyctl deploy
 | Fly.io (shared-cpu-1x, 512MB) | ~$3–5/mo |
 | Supabase | $0 (free tier) |
 | Twilio WhatsApp Sandbox | $0 |
+| Mailgun (inbound routing) | $0 (free tier) |
 | Anthropic API | ~$2–5/mo |
 | Vertex AI / Gemini | ~$0–2/mo |
 | **Total** | **~$5–12/mo** |
