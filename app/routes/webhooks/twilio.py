@@ -10,7 +10,7 @@ from twilio.request_validator import RequestValidator
 from app.config import settings
 from sqlalchemy import select
 
-from app.db.models import MockSession
+from app.db.models import MockSession, PrepPlan
 from app.db.repos.interviews import InterviewRepository
 from app.db.repos.mock_sessions import MockSessionRepository
 from app.db.repos.prep_plans import PrepPlanRepository
@@ -90,7 +90,6 @@ async def _handle_prep(sender: str, args: list[str]) -> str:
         match = next((i for i in interviews if i.company.lower() == company.lower()), None)
 
     if match:
-        import json
         rounds = json.loads(match.round_types)
         plan_md = await generate_plan(
             interview_id=match.id,
@@ -171,7 +170,6 @@ async def _handle_done(sender: str, args: list[str]) -> str:
         if not interviews:
             return "No active interviews found. Forward an invite email first."
 
-        from app.db.models import PrepPlan
         result = await session.execute(
             select(PrepPlan)
             .where(

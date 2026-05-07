@@ -119,11 +119,10 @@ class Interviewer:
             # Fallback: return raw text if JSON parse fails
             return raw.strip()
 
-    async def next_turn(self, transcript: list[dict], user_reply: str, round_type: str) -> TurnOutput:
-        """Given the current transcript and the candidate's latest reply, return next turn."""
+    async def next_turn(self, transcript: list[dict], round_type: str) -> TurnOutput:
+        """Given the current transcript (already includes the candidate's latest turn), return next turn."""
         system = _system_for(round_type)
         messages = _transcript_to_messages(transcript)
-        messages.append({"role": "user", "content": user_reply})
 
         raw = await complete(
             messages=messages,

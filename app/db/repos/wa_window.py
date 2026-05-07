@@ -1,9 +1,10 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import WaWindowState
+from app.lib.wa_window import is_within_24h
 
 
 class WaWindowRepository:
@@ -41,7 +42,4 @@ class WaWindowRepository:
             select(WaWindowState).where(WaWindowState.recipient_e164 == recipient_e164)
         )
         state = result.scalar_one_or_none()
-        if state is None or state.last_inbound_at is None:
-            return False
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-        return state.last_inbound_at > cutoff
+        return is_within_24h(state.last_inbound_at if state else None)

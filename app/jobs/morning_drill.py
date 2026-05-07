@@ -99,7 +99,17 @@ async def _process_interview(
     # Step 1: mark yesterday's uncompleted plan as skipped.
     await _mark_yesterday_skipped(interview_id)
 
-    # Step 2: generate today's plan (uses weak_patterns from DB).
+    # Step 2: idempotency check — skip if already sent today for this interview.
+    # Must come before generate_plan so a redeploy mid-day doesn't write a duplicate PrepPlan row.
+    idempotency_key = make_key(today, recipient, str(interview_id))
+    async with async_session_factory() as session:
+        already_sent = await OutboundIdempotencyRepository(session).exists(idempotency_key)
+
+    if already_sent:
+        logger.info("morning_drill.already_sent", interview_id=interview_id)
+        return
+
+    # Step 3: generate today's plan (uses weak_patterns from DB).
     async with async_session_factory() as session:
         wp_repo = WeakPatternRepository(session)
         top_patterns = await wp_repo.top_patterns(limit=5)
@@ -119,7 +129,7 @@ async def _process_interview(
         exclude_recent=exclude_recent,
     )
 
-    # Step 3: save plan to DB.
+    # Step 4: save plan to DB.
     async with async_session_factory() as session:
         plan = await PrepPlanRepository(session).create(
             interview_id=interview_id,
@@ -127,15 +137,6 @@ async def _process_interview(
             time_budget_min=120,
         )
         plan_id = plan.id
-
-    # Step 4: idempotency check — skip if already sent today for this interview.
-    idempotency_key = make_key(today, recipient, str(interview_id))
-    async with async_session_factory() as session:
-        already_sent = await OutboundIdempotencyRepository(session).exists(idempotency_key)
-
-    if already_sent:
-        logger.info("morning_drill.already_sent", interview_id=interview_id)
-        return
 
     # Step 5: commit to prep-vault.
     vault_path = f"plans/{company.lower().replace(' ', '-')}-{today}.md"

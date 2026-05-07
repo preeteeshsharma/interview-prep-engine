@@ -82,7 +82,7 @@ class MockOrchestrator:
 
         # Interviewer and Observer run in parallel.
         turn_output, rubric = await asyncio.gather(
-            _interviewer.next_turn(transcript, user_message, round_type),
+            _interviewer.next_turn(transcript, round_type),
             _observer.score(transcript),
         )
 

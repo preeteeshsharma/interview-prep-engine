@@ -1,6 +1,6 @@
 import asyncio
 
-from github import Github
+from github import Github, GithubException
 
 from app.config import settings
 
@@ -31,7 +31,9 @@ async def commit_file(
                 content=content,
                 sha=existing.sha,
             )
-        except Exception:
+        except GithubException as exc:
+            if exc.status != 404:
+                raise
             result = repo.create_file(
                 path=path,
                 message=message,
