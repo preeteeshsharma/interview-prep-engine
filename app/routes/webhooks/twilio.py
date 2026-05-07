@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
@@ -37,6 +36,10 @@ _HELP = (
     "  done <rating>  — mark drill complete (easy/medium/hard)\n"
     "  status         — show active interviews"
 )
+
+# Subset of RoundType valid for user-initiated mock sessions.
+# Excludes "hiring_manager" and "unknown" — no mock interview handler for those.
+_MOCK_ROUNDS = {"dsa", "lld", "sysdesign", "behavioral"}
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +93,7 @@ async def _handle_prep(sender: str, args: list[str]) -> str:
         match = next((i for i in interviews if i.company.lower() == company.lower()), None)
 
     if match:
-        rounds = json.loads(match.round_types)
+        rounds = match.round_types
         plan_md = await generate_plan(
             interview_id=match.id,
             company=match.company,
@@ -132,8 +135,7 @@ async def _handle_prep(sender: str, args: list[str]) -> str:
 
 async def _handle_mock(sender: str, args: list[str]) -> str:
     round_type = args[0].lower() if args else "behavioral"
-    valid = {"dsa", "lld", "sysdesign", "behavioral"}
-    if round_type not in valid:
+    if round_type not in _MOCK_ROUNDS:
         return f"Unknown round '{round_type}'. Use: dsa, lld, sysdesign, behavioral"
 
     async with async_session_factory() as session:
@@ -197,7 +199,7 @@ async def _handle_status(sender: str) -> str:
 
     lines = ["Active interviews:"]
     for i in interviews:
-        rounds = ", ".join(json.loads(i.round_types))
+        rounds = ", ".join(i.round_types)
         scheduled = i.scheduled_for.strftime("%b %d") if i.scheduled_for else "TBD"
         lines.append(f"  • {i.company} — {i.role} | {rounds} | {scheduled}")
     return "\n".join(lines)
@@ -299,8 +301,11 @@ async def twilio_webhook(request: Request) -> Response:
             reply = await _route(payload)
             await _respond(to=payload.From, body=reply)
         except Exception as exc:
-            logger.error("twilio.route.error", error=str(exc))
-            await send_whatsapp(to=payload.From, body="Something went wrong. Try again.")
+            logger.error("twilio.route.error", error=str(exc), exc_info=True)
+            try:
+                await send_whatsapp(to=payload.From, body="Something went wrong. Try again.")
+            except Exception as send_exc:
+                logger.error("twilio.fallback_send_failed", error=str(send_exc), exc_info=True)
 
     asyncio.create_task(_bg())
 

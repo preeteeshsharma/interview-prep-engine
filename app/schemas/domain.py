@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 RoundType = Literal["DSA", "LLD", "sysdesign", "behavioral", "hiring_manager", "unknown"]
+Rating = Literal["easy", "medium", "hard"]
 
 
 class InterviewDTO(BaseModel):
@@ -23,7 +24,7 @@ class PrepPlanDTO(BaseModel):
     time_budget_min: int
     generated_at: datetime
     completed_at: datetime | None
-    self_rating: str | None
+    self_rating: Rating | None
     skipped: bool
 
 

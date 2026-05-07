@@ -144,12 +144,10 @@ async def test_status_no_active_interviews():
 
 @pytest.mark.asyncio
 async def test_status_lists_active_interviews():
-    import json
-
     mock_interview = MagicMock()
     mock_interview.company = "Zapier"
     mock_interview.role = "Backend Engineer"
-    mock_interview.round_types = json.dumps(["DSA", "behavioral"])
+    mock_interview.round_types = ["DSA", "behavioral"]
     mock_interview.scheduled_for = None
 
     with patch("app.routes.webhooks.twilio.async_session_factory") as mock_factory:

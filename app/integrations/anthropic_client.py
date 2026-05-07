@@ -1,6 +1,6 @@
 import asyncio
 
-from anthropic import AsyncAnthropic
+from anthropic import APIConnectionError, APIStatusError, APITimeoutError, AsyncAnthropic
 
 from app.config import settings
 from app.lib.logging import get_logger
@@ -10,7 +10,8 @@ logger = get_logger(__name__)
 client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 _MAX_RETRIES = 3
-_RETRY_BACKOFF_SECONDS = 2
+_RETRY_BASE_SECONDS = 2
+_RETRYABLE_STATUSES = {429, 500, 502, 529}
 
 
 async def complete(
@@ -21,7 +22,8 @@ async def complete(
 ) -> str:
     """Call Claude and return the text of the first content block.
 
-    Retries up to 3 times on HTTP 529 (overloaded) with 2-second backoff.
+    Retries up to 3 times on transient errors (429/500/502/529, connection
+    errors, timeouts) with exponential backoff (2s, 4s).
     """
     for attempt in range(_MAX_RETRIES):
         try:
@@ -32,19 +34,18 @@ async def complete(
                 max_tokens=max_tokens,
             )
             return response.content[0].text
-        except Exception as exc:
-            # anthropic SDK raises anthropic.APIStatusError for HTTP errors;
-            # status_code 529 means the API is overloaded.
+        except (APIStatusError, APIConnectionError, APITimeoutError) as exc:
             status = getattr(exc, "status_code", None)
-            if status == 529 and attempt < _MAX_RETRIES - 1:
-                wait = _RETRY_BACKOFF_SECONDS * (attempt + 1)
+            retryable = isinstance(exc, (APIConnectionError, APITimeoutError)) or status in _RETRYABLE_STATUSES
+            if retryable and attempt < _MAX_RETRIES - 1:
+                wait = _RETRY_BASE_SECONDS ** (attempt + 1)  # 2s, 4s
                 logger.warning(
-                    "anthropic.overloaded",
+                    "anthropic.retrying",
                     attempt=attempt + 1,
+                    status=status,
                     wait_seconds=wait,
+                    error=str(exc),
                 )
                 await asyncio.sleep(wait)
                 continue
             raise
-    # Unreachable — the loop always either returns or re-raises.
-    raise RuntimeError("Exhausted retries without returning or raising")

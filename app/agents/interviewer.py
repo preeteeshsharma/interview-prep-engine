@@ -115,8 +115,8 @@ class Interviewer:
         try:
             parsed = TurnOutput.model_validate_json(raw.strip())
             return parsed.question
-        except Exception:
-            # Fallback: return raw text if JSON parse fails
+        except Exception as exc:
+            logger.warning("interviewer.start_session.parse_failed", error=str(exc), raw=raw[:200])
             return raw.strip()
 
     async def next_turn(self, transcript: list[dict], round_type: str) -> TurnOutput:

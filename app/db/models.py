@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, func
+from sqlalchemy import DateTime, ForeignKey, JSON, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -14,7 +15,7 @@ class Interview(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     company: Mapped[str]
     role: Mapped[str]
-    round_types: Mapped[str]  # JSON-encoded list[str]
+    round_types: Mapped[list[Any]] = mapped_column(JSON)
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(default="active")  # active | done | cancelled
     created_at: Mapped[datetime] = mapped_column(

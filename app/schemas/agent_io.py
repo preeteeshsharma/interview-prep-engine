@@ -14,9 +14,12 @@ class RubricScore(BaseModel):
     time_management: int = Field(ge=1, le=5)
     requirements: int = Field(ge=1, le=5)
 
+    def total(self) -> int:
+        return self.depth + self.clarity + self.edge_cases + self.time_management + self.requirements
+
 
 class CritiqueEntry(BaseModel):
-    quote_offset: int
+    quote_offset: int = Field(ge=0)
     issue: str
     suggestion: str
 

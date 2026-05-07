@@ -1,12 +1,12 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TwilioInbound(BaseModel):
     """Form fields from Twilio inbound WhatsApp webhook."""
 
-    From: str
+    From: str = Field(min_length=1)
     Body: str
-    MessageSid: str
+    MessageSid: str = Field(min_length=1)
 
 
 class MailgunInbound(BaseModel):

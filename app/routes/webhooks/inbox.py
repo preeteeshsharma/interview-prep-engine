@@ -62,7 +62,8 @@ async def _parse_company_role(subject: str, body: str) -> tuple[str, str]:
     try:
         parsed = json.loads(raw.strip())
         return parsed.get("company", "Unknown"), parsed.get("role", "Unknown")
-    except Exception:
+    except Exception as exc:
+        logger.warning("inbox.parse_company_role.failed", error=str(exc), exc_info=True)
         return "Unknown", "Unknown"
 
 
@@ -116,14 +117,24 @@ async def _run_pipeline(payload: MailgunInbound) -> None:
         )
 
     vault_path = f"plans/{company.lower().replace(' ', '-')}-{interview_id}.md"
-    sha = await commit_file(
-        path=vault_path,
-        content=plan_md,
-        message=f"prep: {company} — {role} (interview #{interview_id})",
-        github_token=ctx.github_token,
-        vault_repo=ctx.vault_repo,
-    )
-    logger.info("inbox.committed", path=vault_path, sha=sha)
+    try:
+        sha = await commit_file(
+            path=vault_path,
+            content=plan_md,
+            message=f"prep: {company} — {role} (interview #{interview_id})",
+            github_token=ctx.github_token,
+            vault_repo=ctx.vault_repo,
+        )
+        logger.info("inbox.committed", path=vault_path, sha=sha)
+    except Exception as exc:
+        logger.warning("inbox.vault_commit_failed", path=vault_path, error=str(exc), exc_info=True)
+
+
+async def _bg_pipeline(payload: MailgunInbound) -> None:
+    try:
+        await _run_pipeline(payload)
+    except Exception as exc:
+        logger.error("inbox.pipeline.failed", sender=payload.sender, error=str(exc), exc_info=True)
 
 
 @router.post("/hooks/inbox")
@@ -142,6 +153,6 @@ async def inbox_webhook(request: Request) -> dict[str, str]:
     )
     logger.info("mailgun.inbound.received", sender=payload.sender, subject=payload.subject)
 
-    asyncio.create_task(_run_pipeline(payload))
+    asyncio.create_task(_bg_pipeline(payload))
 
     return {"status": "queued"}

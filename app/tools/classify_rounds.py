@@ -1,7 +1,9 @@
 import json
+from typing import get_args
 
 from app.integrations.anthropic_client import complete
 from app.lib.logging import get_logger
+from app.schemas.domain import RoundType
 
 logger = get_logger(__name__)
 
@@ -37,7 +39,7 @@ Examples:
   Output: ["DSA", "sysdesign", "behavioral"]
 """
 
-_VALID = {"DSA", "LLD", "sysdesign", "behavioral", "hiring_manager", "unknown"}
+_VALID: set[str] = set(get_args(RoundType))
 
 
 async def classify_rounds(jd_text: str) -> list[str]:

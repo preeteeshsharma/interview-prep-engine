@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -69,7 +68,7 @@ async def run_morning_drill() -> None:
                     interview_id=interview.id,
                     company=interview.company,
                     role=interview.role,
-                    round_types=json.loads(interview.round_types),
+                    round_types=interview.round_types,
                     recipient=recipient,
                     today=today,
                     github_token=ctx.github_token,
@@ -149,7 +148,7 @@ async def _process_interview(
             vault_repo=vault_repo,
         )
     except Exception as exc:
-        logger.warning("morning_drill.vault_commit_failed", error=str(exc))
+        logger.warning("morning_drill.vault_commit_failed", path=vault_path, error=str(exc), exc_info=True)
 
     # Step 6: check 24h WhatsApp window and send.
     async with async_session_factory() as session:
@@ -162,25 +161,28 @@ async def _process_interview(
         "Reply done easy / done medium / done hard when finished."
     )
 
-    if within_window:
-        chunks = chunk_message(message)
-        sid = None
-        for chunk in chunks:
-            sid = await send_whatsapp(to=recipient, body=chunk)
-    else:
-        # Outside 24h window — send a template nudge.
-        # Using freeform with a shorter message; production should use an approved template SID.
-        # Twilio Sandbox accepts freeform regardless of window for sandbox numbers.
-        sid = await send_whatsapp(
-            to=recipient,
-            body=f"Your {company} prep drill is ready in prep-vault. Reply 'done easy/medium/hard' when finished.",
-        )
+    sid = None
+    try:
+        if within_window:
+            chunks = chunk_message(message)
+            for chunk in chunks:
+                sid = await send_whatsapp(to=recipient, body=chunk)
+        else:
+            # Outside 24h window — send a template nudge.
+            # Using freeform with a shorter message; production should use an approved template SID.
+            # Twilio Sandbox accepts freeform regardless of window for sandbox numbers.
+            sid = await send_whatsapp(
+                to=recipient,
+                body=f"Your {company} prep drill is ready in prep-vault. Reply 'done easy/medium/hard' when finished.",
+            )
+    except Exception as exc:
+        logger.error("morning_drill.send_failed", interview_id=interview_id, error=str(exc), exc_info=True)
 
-    # Step 7: record idempotency to prevent duplicate sends on redeploy.
+    # Step 7: record idempotency even if send failed — prevents duplicate sends on retry.
     async with async_session_factory() as session:
         await OutboundIdempotencyRepository(session).record(
             key=idempotency_key,
-            message_sid=sid or "unknown",
+            message_sid=sid or "send_failed",
         )
 
     logger.info(

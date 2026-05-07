@@ -1,4 +1,3 @@
-import json
 from datetime import datetime
 
 from sqlalchemy import select
@@ -21,7 +20,7 @@ class InterviewRepository:
         interview = Interview(
             company=company,
             role=role,
-            round_types=json.dumps(round_types),
+            round_types=round_types,
             scheduled_for=scheduled_for,
             status="active",
         )

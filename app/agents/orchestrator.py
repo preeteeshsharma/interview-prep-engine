@@ -81,10 +81,22 @@ class MockOrchestrator:
         transcript.append(candidate_turn)
 
         # Interviewer and Observer run in parallel.
-        turn_output, rubric = await asyncio.gather(
+        # return_exceptions=True so Observer failure never kills the user's turn.
+        turn_result, rubric_result = await asyncio.gather(
             _interviewer.next_turn(transcript, round_type),
             _observer.score(transcript),
+            return_exceptions=True,
         )
+        if isinstance(turn_result, Exception):
+            raise turn_result
+        turn_output = turn_result
+        rubric = (
+            rubric_result
+            if not isinstance(rubric_result, Exception)
+            else RubricScore(depth=3, clarity=3, edge_cases=3, time_management=3, requirements=3)
+        )
+        if isinstance(rubric_result, Exception):
+            logger.warning("orchestrator.observer_failed", error=str(rubric_result), exc_info=True)
 
         # Append interviewer's next question.
         interviewer_turn = {
@@ -131,7 +143,11 @@ class MockOrchestrator:
             else RubricScore(depth=3, clarity=3, edge_cases=3, time_management=3, requirements=3)
         )
 
-        critique = await _coach.critique(transcript, rubric)
+        try:
+            critique = await _coach.critique(transcript, rubric)
+        except Exception as exc:
+            logger.error("orchestrator.coach_failed", session_id=session_id, error=str(exc), exc_info=True)
+            critique = Critique(entries=[], overall_summary="Critique unavailable.")
 
         async with async_session_factory() as session:
             await MockSessionRepository(session).finalize(
@@ -163,15 +179,14 @@ class MockOrchestrator:
                 vault_repo=ctx.vault_repo,
             )
         except Exception as exc:
-            logger.warning("orchestrator.vault_commit_failed", error=str(exc))
+            logger.warning("orchestrator.vault_commit_failed", path=f"mocks/session-{session_id}.md", error=str(exc), exc_info=True)
 
         logger.info("orchestrator.session.ended", session_id=session_id)
         return _format_summary(rubric, critique)
 
 
 def _format_summary(rubric: RubricScore, critique: Critique) -> str:
-    score = sum([rubric.depth, rubric.clarity, rubric.edge_cases,
-                 rubric.time_management, rubric.requirements])
+    score = rubric.total()
     lines = [
         f"Session complete. Score: {score}/25",
         f"  depth:{rubric.depth} clarity:{rubric.clarity} edges:{rubric.edge_cases} "

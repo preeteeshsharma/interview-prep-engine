@@ -64,11 +64,7 @@ class Coach:
                 for e in entries_raw:
                     offset = e.get("quote_offset", -1)
                     if isinstance(offset, int) and 0 <= offset < transcript_len:
-                        valid_entries.append(CritiqueEntry(
-                            quote_offset=offset,
-                            issue=e["issue"],
-                            suggestion=e["suggestion"],
-                        ))
+                        valid_entries.append(CritiqueEntry.model_validate(e))
                     else:
                         invalid.append(offset)
 
