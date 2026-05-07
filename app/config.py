@@ -1,0 +1,19 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    anthropic_api_key: str
+    twilio_account_sid: str
+    twilio_auth_token: str
+    twilio_from_whatsapp: str  # e.g. whatsapp:+14155238886
+    twilio_to_whatsapp: str  # Preeteesh's personal number
+    mailgun_signing_key: str
+    github_token: str
+    github_vault_repo: str  # e.g. preeteesh/prep-vault
+    database_url: str = "sqlite+aiosqlite:///./data/app.db"
+    env: str = "development"
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+settings = Settings()
