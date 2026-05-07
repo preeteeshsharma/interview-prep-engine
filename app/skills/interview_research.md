@@ -163,6 +163,8 @@ Vary queries — use synonyms, different orderings, and try with and without lev
 
 **Always include source links.** The candidate should be able to click through and verify everything. If a question appeared in multiple threads, cite the most accessible one.
 
+**Copy URLs verbatim from search results.** Never construct, guess, or recall a URL from memory — post IDs and slugs vary and hallucinated URLs will 404. If you don't have the exact URL from a search result, omit the link rather than fabricate one.
+
 **Never fabricate content.** If search results don't yield a specific question or round detail, say: "I didn't find specific questions for this round — here's what I searched and what I found instead."
 
 **Flag staleness.** If the most recent data is 2+ years old, say so prominently. Interview processes change. Older data is still useful context but candidates should know.
