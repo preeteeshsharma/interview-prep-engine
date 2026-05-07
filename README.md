@@ -11,6 +11,11 @@ A WhatsApp-based interview prep bot. You text it, it researches the company usin
    → extracts company=Fivetran, role=Senior SWE, date=2026-05-12, rounds=[DSA]
    → "Coding Ability and Problem Solving" also works — mapped to DSA in Python
 
+1a. Idempotency check — if an active PrepPlan already exists for this company
+    and the interview date hasn't changed, returns early with "already exists"
+    (avoids re-running the researcher on duplicate sends)
+    → to force regeneration: change the date, or send 'prep Fivetran refresh'
+
 2. researcher (quality tier — Claude Sonnet + web_search)
    → runs 4-6 searches across Blind, LeetCode Discuss, Glassdoor, Reddit
    → guided by interview_research.md skill loaded as its system prompt
@@ -22,12 +27,15 @@ A WhatsApp-based interview prep bot. You text it, it researches the company usin
    → guided by the plan system prompt (company-specific drills, LeetCode numbers)
    → if research contains real questions, uses those as drill material
 
-4. DB write: Interview + PrepPlan rows in Supabase
-
-5. Vault commit: two files per run in prep-vault GitHub repo
+4. Vault commit: two files per run in prep-vault GitHub repo
    → fivetran/dsa/{epoch}-plan.md
    → fivetran/dsa/{epoch}-research.md
    (epoch suffix means no overwriting — every run creates new files)
+   → any previous pending PrepPlan for this interview is auto-skipped
+
+5. DB write: Interview + PrepPlan rows in Supabase
+   → PrepPlan stores vault_path (GitHub file path) + drill_label (first heading)
+   → plan content lives in the vault, not the DB
 
 6. WhatsApp reply: first 1200 chars of plan + "(Full plan + sources in prep-vault)"
 ```
@@ -125,7 +133,7 @@ The three `.md` files in `app/skills/` are **not prompt templates** — they are
 | `prep Zapier SWE, june 15, Coding Ability and Problem Solving` | Actual round name from invite works, mapped to DSA |
 | `mock dsa` | Start mock (dsa / lld / sysdesign / behavioral) |
 | `study` | Socratic session from latest research |
-| `done hard` | Mark drill complete (easy / medium / hard) |
+| `done hard` | Mark drill complete — if multiple active interviews, prompt shows company + rounds |
 | `status` | List active interviews |
 | `end` | End mock/study session, get Coach critique |
 
@@ -156,7 +164,7 @@ Pending state is stored in `WaWindowState.pending_prep` (Supabase). A new comman
 | Table | What's in it |
 |---|---|
 | `interviews` | company, role, round_types (`["DSA", "LLD", ...]`), scheduled_for, status |
-| `prep_plans` | plan_md, time_budget_min, completed_at, self_rating, skipped |
+| `prep_plans` | vault_path (GitHub file path), drill_label (first heading), time_budget_min, completed_at, self_rating, skipped |
 | `mock_sessions` | round_type, transcript_json, rubric_json, critique_json |
 | `weak_patterns` | pattern, weight — drives drill reassignment |
 | `wa_window_state` | last_inbound_at, last_template_at, pending_prep (mid-conversation state) |
