@@ -16,7 +16,9 @@ _RATE_LIMIT_WAIT = 65
 _MODEL_MAP: dict[str, str] = {
     "claude-sonnet-4-6": "gemini-2.5-pro",
     "claude-opus-4-7": "gemini-2.5-pro",
-    "claude-haiku-4-5-20251001": "gemini-2.0-flash",
+    # gemini-2.0-flash is unavailable to new API users; 2.5-flash is the successor
+    # and has a separate rate limit bucket from 2.5-pro (10 RPM vs 5 RPM on free tier).
+    "claude-haiku-4-5-20251001": "gemini-2.5-flash",
 }
 
 
