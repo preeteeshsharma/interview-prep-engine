@@ -116,6 +116,9 @@ async def generate_plan(
 
     research_section = (
         f"\n\n## Live research — real interview reports\n\n{research_context}"
+        f"\n\n**Important:** If the research above contains specific questions asked at "
+        f"{company}, use those exact questions as drill material for the relevant rounds. "
+        f"Do not substitute generic problems when real questions are available."
         if research_context
         else ""
     )

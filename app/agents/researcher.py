@@ -19,15 +19,9 @@ async def research(company: str, role: str, round_type: str | None = None) -> st
     round_type=None → full process research; round_type="dsa" → questions-mode for that round.
     """
     if round_type:
-        query = (
-            f"{company} {role} {round_type} interview questions 2024 2025 — "
-            f"what questions were asked, confirmed from real candidates"
-        )
+        query = f"Research {company} {role} {round_type} interview questions — questions mode."
     else:
-        query = (
-            f"{company} {role} interview process 2024 2025 — "
-            f"full loop breakdown, all rounds, timeline, what each round tests"
-        )
+        query = f"Research the {company} {role} interview process — process mode."
 
     logger.info("researcher.start", company=company, role=role, round_type=round_type)
 

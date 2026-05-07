@@ -19,9 +19,7 @@ class Tutor:
         """
         opening_prompt = (
             f"Here is the interview research for this session:\n\n"
-            f"{research_context}\n\n"
-            f"Follow your instructions: classify each question as [LeetCode], [Local], or [Bug Squash], "
-            f"list them with one-line summaries, and ask which one to start with."
+            f"{research_context}"
         )
         return await complete(
             messages=[{"role": "user", "content": opening_prompt}],
