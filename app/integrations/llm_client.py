@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from app.config import settings
-from app.integrations.anthropic_client import AnthropicProvider
+from app.integrations.anthropic_client import AnthropicProvider, ResponseTruncatedError
 from app.integrations.llm_interface import LLMProvider
 from app.lib.app_config import get as get_config
 from app.lib.logging import get_logger
@@ -27,8 +27,8 @@ _MAX_TOKENS: dict[str, int] = {
 }
 _MAX_TOKENS_TOOLS: dict[str, int] = {
     "claude-haiku-4-5-20251001": 1024,
-    "claude-sonnet-4-6": 4096,
-    "claude-opus-4-7": 4096,
+    "claude-sonnet-4-6": 6000,
+    "claude-opus-4-7": 6000,
 }
 
 _anthropic: LLMProvider = AnthropicProvider()
@@ -91,6 +91,11 @@ async def complete_with_tools(
         result = await primary.complete_with_tools(messages, system, tools, model, tokens)
         logger.debug("llm.provider", provider=type(primary).__name__, model=model)
         return result
+    except ResponseTruncatedError as exc:
+        fallback = _fallback(primary)
+        if fallback is None:
+            raise
+        logger.warning("llm.truncated_falling_back", error=str(exc), fallback=type(fallback).__name__)
     except Exception as exc:
         fallback = _fallback(primary)
         if fallback is None:

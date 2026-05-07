@@ -5,6 +5,8 @@ import hmac
 from fastapi import APIRouter, HTTPException, Request
 
 from app.config import settings
+from app.integrations.twilio_client import send_whatsapp
+from app.lib.chunker import chunk_message
 from app.lib.logging import get_logger
 from app.lib.prep_pipeline import execute_prep
 from app.schemas.webhooks import MailgunInbound
@@ -62,6 +64,9 @@ async def _run_pipeline(payload: MailgunInbound) -> None:
 
     result = await execute_prep(intent)
     logger.info("inbox.pipeline.done", result_preview=result[:100])
+
+    for chunk in chunk_message(result):
+        await send_whatsapp(to=settings.twilio_to_whatsapp, body=chunk)
 
 
 async def _bg_pipeline(payload: MailgunInbound) -> None:

@@ -4,6 +4,9 @@ import asyncio
 
 from anthropic import APIConnectionError, APIStatusError, APITimeoutError, AsyncAnthropic
 
+class ResponseTruncatedError(RuntimeError):
+    """Raised when the model hits max_tokens — caller should fall back to another provider."""
+
 from app.config import settings
 from app.lib.logging import get_logger
 
@@ -34,6 +37,8 @@ class AnthropicProvider:
                     messages=messages,
                     max_tokens=max_tokens,
                 )
+                if response.stop_reason == "max_tokens":
+                    logger.warning("anthropic.truncated", model=model, max_tokens=max_tokens)
                 return response.content[0].text
             except (APIStatusError, APIConnectionError, APITimeoutError) as exc:
                 status = getattr(exc, "status_code", None)
@@ -62,6 +67,9 @@ class AnthropicProvider:
                     tools=tools,
                     max_tokens=max_tokens,
                 )
+                if response.stop_reason == "max_tokens":
+                    logger.warning("anthropic.truncated", model=model, max_tokens=max_tokens)
+                    raise ResponseTruncatedError(f"max_tokens={max_tokens} hit on {model}")
                 texts = [b.text for b in response.content if hasattr(b, "text")]
                 return "\n\n".join(texts)
             except (APIStatusError, APIConnectionError, APITimeoutError) as exc:

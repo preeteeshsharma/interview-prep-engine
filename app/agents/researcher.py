@@ -41,7 +41,7 @@ async def research(
         system=_SKILL,
         tools=[_WEB_SEARCH_TOOL],
         model="claude-sonnet-4-6",
-        max_tokens=4096,
+        max_tokens=6000,
     )
 
     logger.info("researcher.done", company=company, role=role, chars=len(result))

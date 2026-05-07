@@ -113,8 +113,8 @@ async def generate_plan(
 
     weak_section = "\n".join(f"- {p}" for p in weak_patterns) if weak_patterns else "None identified yet."
 
-    # Cap research to ~4000 chars to stay within token rate limits.
-    research_trimmed = research_context[:4000] + ("…" if len(research_context) > 4000 else "")
+    # Cap research to ~8000 chars — researcher outputs 5–8k, pass it in full.
+    research_trimmed = research_context[:8000] + ("…" if len(research_context) > 8000 else "")
     research_section = (
         f"\n\n## Live research — real interview reports\n\n{research_trimmed}"
         f"\n\n**Important:** If the research above contains specific questions asked at "
@@ -140,7 +140,7 @@ Weak patterns to prioritise:
         messages=[{"role": "user", "content": user_msg}],
         system=_SYSTEM,
         model="claude-haiku-4-5-20251001",
-        max_tokens=3000,
+        max_tokens=4000,
     )
 
     logger.info("generate_plan.done", interview_id=interview_id, company=company, rounds=round_types)
