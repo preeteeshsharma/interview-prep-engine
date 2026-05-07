@@ -533,31 +533,28 @@ async def _handle_study(sender: str, args: list[str]) -> str:
     company_hint = intent.company
     round_hint = (intent.rounds or [None])[0]
 
-    # Resolve company — from args, or single active interview.
     async with async_session_factory() as session:
         interviews = await InterviewRepository(session).list_active()
 
-    company_slug = None
-    company_label = company_hint
+    if not interviews:
+        return "No active interviews. Run 'prep <company> <date>' first."
 
-    if company_hint:
-        match = next((i for i in interviews if i.company.lower() == company_hint.lower()), None)
-        company_slug = company_hint.lower().replace(" ", "-")
-        company_label = match.company if match else company_hint
-    elif len(interviews) == 1:
-        company_slug = interviews[0].company.lower().replace(" ", "-")
-        company_label = interviews[0].company
-    elif interviews:
-        options = "\n".join(f"  • {i.company} ({i.role})" for i in interviews)
+    # Resolve to a single interview using company + round hints.
+    interview = _resolve_interview(interviews, company_hint, round_hint)
+
+    if interview is None:
+        options = "\n".join(
+            f"  • {i.company} — {i.round_type or 'general'} ({i.role})" for i in interviews
+        )
         pending = {"_command": "study", "round": round_hint}
         async with async_session_factory() as session:
             await WaWindowRepository(session).set_pending_prep(sender, pending)
         return f"Which interview?\n{options}\n\nReply: study <company> <round>"
-    else:
-        return "No active interviews. Run 'prep <company>' first."
 
-    # Resolve round — from args, or list available vault rounds.
-    round_slug = round_hint.lower() if round_hint else None
+    company_slug = interview.company.lower().replace(" ", "-")
+    company_label = interview.company
+    # Pre-populate round from the interview's own round_type if not given.
+    round_slug = (round_hint or interview.round_type or "").lower() or None
 
     if not round_slug:
         available = await list_vault_rounds(
@@ -572,7 +569,7 @@ async def _handle_study(sender: str, args: list[str]) -> str:
                 await WaWindowRepository(session).set_pending_prep(sender, pending)
             return f"Which round for {company_label}? {options}\n\nReply: study {company_label.lower()} <round>"
         else:
-            return f"No prep found for {company_label}. Run 'prep {company_label}' first."
+            return f"No prep found for {company_label}. Run 'prep {company_label} <date>' first."
 
     return await _execute_study(sender, company_slug, company_label, round_slug, ctx)
 
@@ -588,11 +585,13 @@ async def _execute_study(sender: str, company_slug: str, company_label: str, rou
 
     async with async_session_factory() as session:
         interviews = await InterviewRepository(session).list_active()
-    match = next((i for i in interviews if i.company.lower().replace(" ", "-") == company_slug), None)
-    interview_id = match.id if match else (interviews[0].id if interviews else None)
+    match = _resolve_interview(interviews, company_slug.replace("-", " "), round_slug)
+    if match is None:
+        match = next((i for i in interviews if i.company.lower().replace(" ", "-") == company_slug), None)
+    interview_id = match.id if match else None
 
     if interview_id is None:
-        return "No active interview found. Run 'prep <company>' first."
+        return "No active interview found. Run 'prep <company> <date>' first."
 
     async with async_session_factory() as session:
         session_obj = await MockSessionRepository(session).create(
@@ -625,20 +624,15 @@ async def _handle_study_followup(sender: str, pending: dict, body: str) -> str:
         await WaWindowRepository(session).clear_pending_prep(sender)
         interviews = await InterviewRepository(session).list_active()
 
-    company_slug = None
-    company_label = company_hint or ""
-    if company_hint:
-        match = next((i for i in interviews if i.company.lower() == company_hint.lower()), None)
-        company_slug = company_hint.lower().replace(" ", "-")
-        company_label = match.company if match else company_hint
-    elif interviews:
-        company_slug = interviews[0].company.lower().replace(" ", "-")
-        company_label = interviews[0].company
-
-    if not company_slug:
+    interview = _resolve_interview(interviews, company_hint, round_hint)
+    if interview is None and interviews:
+        interview = interviews[0]
+    if interview is None:
         return "No active interviews found."
 
-    round_slug = round_hint.lower() if round_hint else None
+    company_slug = interview.company.lower().replace(" ", "-")
+    company_label = interview.company
+    round_slug = (round_hint or interview.round_type or "").lower() or None
     if not round_slug:
         available = await list_vault_rounds(company_slug, github_token=ctx.github_token, vault_repo=ctx.vault_repo)
         round_slug = available[0] if available else "general"

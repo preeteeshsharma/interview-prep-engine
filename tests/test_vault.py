@@ -198,6 +198,7 @@ async def test_handle_study_returns_no_research_found_on_404(monkeypatch):
     mock_interview = MagicMock()
     mock_interview.id = 1
     mock_interview.company = "Stripe"
+    mock_interview.round_type = None
 
     mock_repo = AsyncMock()
     mock_repo.list_active.return_value = [mock_interview]
@@ -231,6 +232,7 @@ async def test_handle_study_returns_no_research_found_on_missing_candidates(monk
     mock_interview = MagicMock()
     mock_interview.id = 1
     mock_interview.company = "Zapier"
+    mock_interview.round_type = None
 
     mock_repo = AsyncMock()
     mock_repo.list_active.return_value = [mock_interview]
