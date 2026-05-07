@@ -211,21 +211,18 @@ async def _commit_plan_to_vault(interview_id: int, company: str, plan_md: str, r
     try:
         ctx = await _get_ctx()
         slug = company.lower().replace(" ", "-")
+        # Append research (with source links) directly to the plan file so links
+        # are visible without navigating to a second file.
+        combined = plan_md
+        if research:
+            combined += f"\n\n---\n\n## Research & Sources\n\n{research}"
         await commit_file(
             path=f"plans/plan-{interview_id}-{slug}.md",
-            content=plan_md,
+            content=combined,
             message=f"plan: {company} interview #{interview_id}",
             github_token=ctx.github_token,
             vault_repo=ctx.vault_repo,
         )
-        if research:
-            await commit_file(
-                path=f"research/research-{interview_id}-{slug}.md",
-                content=research,
-                message=f"research: {company} interview #{interview_id}",
-                github_token=ctx.github_token,
-                vault_repo=ctx.vault_repo,
-            )
     except Exception as exc:
         logger.warning("twilio.vault_commit_failed", interview_id=interview_id, error=str(exc), exc_info=True)
 

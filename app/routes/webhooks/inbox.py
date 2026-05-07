@@ -9,7 +9,7 @@ from app.config import settings
 from app.db.repos.interviews import InterviewRepository
 from app.db.repos.prep_plans import PrepPlanRepository
 from app.db.session import async_session_factory
-from app.integrations.anthropic_client import complete
+from app.integrations.llm_client import complete
 from app.integrations.github_client import commit_file
 from app.lib.logging import get_logger
 from app.lib.user_context import get_user_context

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from app.integrations.anthropic_client import complete
+from app.integrations.llm_client import complete
 from app.lib.json_utils import strip_fences
 from app.lib.logging import get_logger
 from app.schemas.domain import RoundType

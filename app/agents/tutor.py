@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.integrations.anthropic_client import complete
+from app.integrations.llm_client import complete
 from app.lib.logging import get_logger
 
 logger = get_logger(__name__)

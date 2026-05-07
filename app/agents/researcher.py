@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.integrations.anthropic_client import complete_with_tools
+from app.integrations.llm_client import complete_with_tools
 from app.lib.logging import get_logger
 
 logger = get_logger(__name__)

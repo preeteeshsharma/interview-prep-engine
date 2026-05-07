@@ -1,7 +1,7 @@
 import json
 from typing import get_args
 
-from app.integrations.anthropic_client import complete
+from app.integrations.llm_client import complete
 from app.lib.logging import get_logger
 from app.schemas.domain import RoundType
 

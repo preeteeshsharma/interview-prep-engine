@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     owner_email: str = "owner@example.com"  # V1 single-user identity — replaced by User table in V2
     database_url: str = "postgresql+asyncpg://user:password@host:5432/dbname"
     tavily_api_key: str = ""
+    gemini_api_key: str = ""
     env: str = "development"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
