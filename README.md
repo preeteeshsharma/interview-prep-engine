@@ -131,17 +131,41 @@ The three `.md` files in `app/skills/` are **not prompt templates** — they are
 | `prep Fivetran Senior SWE, may 12, dsa` | Full details — straight to plan |
 | `prep Google` | Conversational — asks once for missing fields |
 | `prep Zapier SWE, june 15, Coding Ability and Problem Solving` | Actual round name from invite works, mapped to DSA |
-| `mock dsa` | Start mock (dsa / lld / sysdesign / behavioral) |
-| `study` | Socratic session from latest research |
-| `done hard` | Mark drill complete — if multiple active interviews, prompt shows company + rounds |
+| `mock google dsa` | Start mock with vault context — ask-once if company/round ambiguous |
+| `mock` | Asks for company then round |
+| `study google dsa` | Socratic session with latest research + plan from vault |
+| `study` | Asks for company then round |
+| `done google hard` | Mark drill complete — ask-once if multiple active interviews |
+| `done hard` | Marks the single active interview |
 | `status` | List active interviews |
 | `end` | End mock/study session, get Coach critique |
 
-### Conversational prep flow
+All commands (`prep`, `mock`, `study`, `done`) follow the same ask-once pattern: if you omit details and there's ambiguity, the bot asks once and applies defaults on the follow-up.
 
-If details are missing, the engine asks once and proceeds with defaults on the follow-up:
+### Conversational flow (same pattern for all commands)
 
 ```
+You:  mock
+Bot:  Which interview?
+        • Google — DSA, LLD (L5 SWE)
+        • Stripe — sysdesign (Senior Engineer)
+      Reply: mock <company> <round>
+
+You:  google dsa
+Bot:  Mock started (session #12). ...
+
+---
+
+You:  study
+Bot:  Which interview?
+        • Google — DSA, LLD (L5 SWE)
+      Reply: study google <round>
+
+You:  google dsa
+Bot:  Study session started. ...
+
+---
+
 You:  prep Google
 Bot:  Got it. Still need:
         • role (e.g. 'senior backend', 'L5 SWE')
