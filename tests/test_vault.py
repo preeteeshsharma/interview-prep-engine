@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.routes.webhooks.twilio import _commit_plan_to_vault
+from app.lib.prep_pipeline import commit_plan_to_vault as _commit_plan_to_vault
 
 
 # ---------------------------------------------------------------------------
@@ -27,8 +27,8 @@ async def test_vault_creates_epoch_prefixed_plan_file():
 
     mock_ctx = MagicMock(github_token="tok", vault_repo="user/vault")
 
-    with patch("app.routes.webhooks.twilio._get_ctx", new=AsyncMock(return_value=mock_ctx)), \
-         patch("app.routes.webhooks.twilio.commit_file", side_effect=_fake_commit):
+    with patch("app.lib.prep_pipeline.get_user_context", new=AsyncMock(return_value=mock_ctx)), \
+         patch("app.lib.prep_pipeline.commit_file", side_effect=_fake_commit):
         await _commit_plan_to_vault(1, "Stripe", "plan content")
 
     assert len(committed) == 1
@@ -49,8 +49,8 @@ async def test_vault_creates_separate_research_file_when_provided():
 
     mock_ctx = MagicMock(github_token="tok", vault_repo="user/vault")
 
-    with patch("app.routes.webhooks.twilio._get_ctx", new=AsyncMock(return_value=mock_ctx)), \
-         patch("app.routes.webhooks.twilio.commit_file", side_effect=_fake_commit):
+    with patch("app.lib.prep_pipeline.get_user_context", new=AsyncMock(return_value=mock_ctx)), \
+         patch("app.lib.prep_pipeline.commit_file", side_effect=_fake_commit):
         await _commit_plan_to_vault(1, "Fivetran", "plan", research="research content", round_label="coding-ability")
 
     paths = {p.split("/")[-1] for p in committed}
@@ -69,8 +69,8 @@ async def test_vault_no_research_file_when_research_empty():
 
     mock_ctx = MagicMock(github_token="tok", vault_repo="user/vault")
 
-    with patch("app.routes.webhooks.twilio._get_ctx", new=AsyncMock(return_value=mock_ctx)), \
-         patch("app.routes.webhooks.twilio.commit_file", side_effect=_fake_commit):
+    with patch("app.lib.prep_pipeline.get_user_context", new=AsyncMock(return_value=mock_ctx)), \
+         patch("app.lib.prep_pipeline.commit_file", side_effect=_fake_commit):
         await _commit_plan_to_vault(1, "Stripe", "plan only", research="")
 
     # Only the plan file, no research file.
@@ -87,8 +87,8 @@ async def test_vault_slugifies_company_and_round():
 
     mock_ctx = MagicMock(github_token="tok", vault_repo="user/vault")
 
-    with patch("app.routes.webhooks.twilio._get_ctx", new=AsyncMock(return_value=mock_ctx)), \
-         patch("app.routes.webhooks.twilio.commit_file", side_effect=_fake_commit):
+    with patch("app.lib.prep_pipeline.get_user_context", new=AsyncMock(return_value=mock_ctx)), \
+         patch("app.lib.prep_pipeline.commit_file", side_effect=_fake_commit):
         await _commit_plan_to_vault(1, "Clear Street", "plan", round_label="System Design")
 
     path = committed[0]
@@ -112,13 +112,13 @@ async def test_vault_each_call_uses_different_epoch():
 
     mock_ctx = MagicMock(github_token="tok", vault_repo="user/vault")
 
-    with patch("app.routes.webhooks.twilio._get_ctx", new=AsyncMock(return_value=mock_ctx)):
-        with patch("app.routes.webhooks.twilio.commit_file", side_effect=_fake_1):
+    with patch("app.lib.prep_pipeline.get_user_context", new=AsyncMock(return_value=mock_ctx)):
+        with patch("app.lib.prep_pipeline.commit_file", side_effect=_fake_1):
             await _commit_plan_to_vault(1, "Stripe", "plan 1")
 
         await asyncio.sleep(1.1)  # ensure epoch increments
 
-        with patch("app.routes.webhooks.twilio.commit_file", side_effect=_fake_2):
+        with patch("app.lib.prep_pipeline.commit_file", side_effect=_fake_2):
             await _commit_plan_to_vault(2, "Stripe", "plan 2")
 
     epoch1 = int(committed_1[0].split("/")[-1].replace("-plan.md", ""))
@@ -213,7 +213,7 @@ async def test_handle_study_returns_no_research_found_on_404(monkeypatch):
     # list_vault_rounds returns [] (404 case) → no rounds available
     with patch("app.routes.webhooks.twilio.async_session_factory", return_value=mock_session), \
          patch("app.routes.webhooks.twilio.InterviewRepository", return_value=mock_repo), \
-         patch("app.routes.webhooks.twilio._get_ctx", new=AsyncMock(
+         patch("app.lib.prep_pipeline.get_user_context", new=AsyncMock(
              return_value=MagicMock(github_token="tok", vault_repo="user/vault")
          )), \
          patch("app.routes.webhooks.twilio.parse_prep_intent", new=AsyncMock(return_value=fake_intent)), \
@@ -247,7 +247,7 @@ async def test_handle_study_returns_no_research_found_on_missing_candidates(monk
     # list_vault_rounds returns one round, but load_vault_context finds nothing.
     with patch("app.routes.webhooks.twilio.async_session_factory", return_value=mock_session), \
          patch("app.routes.webhooks.twilio.InterviewRepository", return_value=mock_repo), \
-         patch("app.routes.webhooks.twilio._get_ctx", new=AsyncMock(
+         patch("app.lib.prep_pipeline.get_user_context", new=AsyncMock(
              return_value=MagicMock(github_token="tok", vault_repo="user/vault")
          )), \
          patch("app.routes.webhooks.twilio.parse_prep_intent", new=AsyncMock(return_value=fake_intent)), \

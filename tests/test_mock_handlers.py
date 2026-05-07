@@ -3,9 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.lib.prep_pipeline import commit_plan_to_vault as _commit_plan_to_vault, execute_prep as _execute_prep
 from app.routes.webhooks.twilio import (
-    _commit_plan_to_vault,
-    _execute_prep,
     _handle_done,
     _handle_link,
     _handle_mock,
@@ -28,9 +27,8 @@ async def test_commit_plan_to_vault_returns_plan_path():
 
     mock_ctx = MagicMock(github_token="tok", vault_repo="user/vault")
 
-    with patch("app.routes.webhooks.twilio._get_ctx", new=AsyncMock(return_value=mock_ctx)), \
-         patch("app.routes.webhooks.twilio.commit_file", side_effect=_fake_commit):
-        result = await _commit_plan_to_vault(1, "Stripe", "plan content")
+    with patch("app.lib.prep_pipeline.commit_file", side_effect=_fake_commit):
+        result = await _commit_plan_to_vault(1, "Stripe", "plan content", github_token="tok", vault_repo="user/vault")
 
     assert result is not None
     assert result.endswith("-plan.md")
@@ -40,8 +38,8 @@ async def test_commit_plan_to_vault_returns_plan_path():
 @pytest.mark.asyncio
 async def test_commit_plan_to_vault_returns_none_on_failure():
     """On any exception, returns None (vault failure must not crash the prep flow)."""
-    with patch("app.routes.webhooks.twilio._get_ctx", new=AsyncMock(side_effect=Exception("network"))):
-        result = await _commit_plan_to_vault(1, "Stripe", "plan content")
+    with patch("app.lib.prep_pipeline.commit_file", side_effect=Exception("network")):
+        result = await _commit_plan_to_vault(1, "Stripe", "plan content", github_token="tok", vault_repo="user/vault")
 
     assert result is None
 
@@ -71,16 +69,16 @@ async def test_prep_idempotency_skips_llm_when_active_plan_exists():
 
     intent = PrepIntent(company="Google", role="L5 SWE", rounds=["DSA"], interview_date="2026-06-15")
 
-    with patch("app.routes.webhooks.twilio.async_session_factory") as mock_factory, \
-         patch("app.routes.webhooks.twilio.InterviewRepository", return_value=mock_interview_repo), \
-         patch("app.routes.webhooks.twilio.PrepPlanRepository", return_value=mock_plan_repo), \
-         patch("app.routes.webhooks.twilio.run_research", new=AsyncMock()) as mock_research, \
-         patch("app.routes.webhooks.twilio.generate_plan", new=AsyncMock()) as mock_gen:
+    with patch("app.lib.prep_pipeline.async_session_factory") as mock_factory, \
+         patch("app.lib.prep_pipeline.InterviewRepository", return_value=mock_interview_repo), \
+         patch("app.lib.prep_pipeline.PrepPlanRepository", return_value=mock_plan_repo), \
+         patch("app.lib.prep_pipeline.run_research", new=AsyncMock()) as mock_research, \
+         patch("app.lib.prep_pipeline.generate_plan", new=AsyncMock()) as mock_gen:
         mock_session = AsyncMock()
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        result = await _execute_prep("whatsapp:+91999", intent)
+        result = await _execute_prep(intent)
 
     mock_research.assert_not_called()
     mock_gen.assert_not_called()
@@ -112,17 +110,18 @@ async def test_prep_reruns_llm_when_date_changes():
     # New intent has a different date — should trigger regeneration.
     intent = PrepIntent(company="Google", role="L5 SWE", rounds=["DSA"], interview_date="2026-06-20")
 
-    with patch("app.routes.webhooks.twilio.async_session_factory") as mock_factory, \
-         patch("app.routes.webhooks.twilio.InterviewRepository", return_value=mock_interview_repo), \
-         patch("app.routes.webhooks.twilio.PrepPlanRepository", return_value=mock_plan_repo), \
-         patch("app.routes.webhooks.twilio.run_research", new=AsyncMock(return_value="research")) as mock_research, \
-         patch("app.routes.webhooks.twilio.generate_plan", new=AsyncMock(return_value="# Plan\n### Two Pointers\n")) as mock_gen, \
-         patch("app.routes.webhooks.twilio._commit_plan_to_vault", new=AsyncMock(return_value="google/dsa/123-plan.md")):
+    with patch("app.lib.prep_pipeline.async_session_factory") as mock_factory, \
+         patch("app.lib.prep_pipeline.InterviewRepository", return_value=mock_interview_repo), \
+         patch("app.lib.prep_pipeline.PrepPlanRepository", return_value=mock_plan_repo), \
+         patch("app.lib.prep_pipeline.run_research", new=AsyncMock(return_value="research")) as mock_research, \
+         patch("app.lib.prep_pipeline.generate_plan", new=AsyncMock(return_value="# Plan\n### Two Pointers\n")) as mock_gen, \
+         patch("app.lib.prep_pipeline.commit_plan_to_vault", new=AsyncMock(return_value="google/dsa/123-plan.md")), \
+         patch("app.lib.prep_pipeline.get_user_context", new=AsyncMock(return_value=MagicMock(github_token="tok", vault_repo="r/v"))):
         mock_session = AsyncMock()
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        await _execute_prep("whatsapp:+91999", intent)
+        await _execute_prep(intent)
 
     mock_research.assert_called_once()
     mock_gen.assert_called_once()
