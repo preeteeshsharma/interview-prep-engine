@@ -118,7 +118,7 @@ async def _process_interview(
         recent_plans = await PrepPlanRepository(session).recent_completed(
             interview_id=interview_id, days=7
         )
-        exclude_recent = [_first_heading(p.plan_md) for p in recent_plans if p.plan_md]
+        exclude_recent = [p.drill_label for p in recent_plans if p.drill_label]
 
     plan_md = await generate_plan(
         interview_id=interview_id,
@@ -129,27 +129,29 @@ async def _process_interview(
         exclude_recent=exclude_recent,
     )
 
-    # Step 4: save plan to DB.
-    async with async_session_factory() as session:
-        plan = await PrepPlanRepository(session).create(
-            interview_id=interview_id,
-            plan_md=plan_md,
-            time_budget_min=120,
-        )
-        plan_id = plan.id
-
-    # Step 5: commit to prep-vault.
-    vault_path = f"plans/{company.lower().replace(' ', '-')}-{today}.md"
+    # Step 4: commit to prep-vault, then save plan to DB with vault path.
+    vault_path_str = f"plans/{company.lower().replace(' ', '-')}-{today}.md"
+    committed_path: str | None = None
     try:
         await commit_file(
-            path=vault_path,
+            path=vault_path_str,
             content=plan_md,
             message=f"drill: {company} — {today}",
             github_token=github_token,
             vault_repo=vault_repo,
         )
+        committed_path = vault_path_str
     except Exception as exc:
-        logger.warning("morning_drill.vault_commit_failed", path=vault_path, error=str(exc), exc_info=True)
+        logger.warning("morning_drill.vault_commit_failed", path=vault_path_str, error=str(exc), exc_info=True)
+
+    async with async_session_factory() as session:
+        plan = await PrepPlanRepository(session).create(
+            interview_id=interview_id,
+            time_budget_min=120,
+            vault_path=committed_path,
+            drill_label=_first_heading(plan_md),
+        )
+        plan_id = plan.id
 
     # Step 6: check 24h WhatsApp window and send.
     async with async_session_factory() as session:
@@ -221,7 +223,7 @@ async def _mark_yesterday_skipped(interview_id: int) -> None:
 
         for plan in plans:
             plan.skipped = True
-            pattern = _first_heading(plan.plan_md)
+            pattern = plan.drill_label
             if pattern:
                 await WeakPatternRepository(session).upsert(
                     pattern=f"{pattern} (skipped)",

@@ -35,7 +35,8 @@ class PrepPlan(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     interview_id: Mapped[int] = mapped_column(ForeignKey("interviews.id"))
-    plan_md: Mapped[str]
+    vault_path: Mapped[str | None] = mapped_column(nullable=True)  # e.g. google/dsa/1778165199-plan.md
+    drill_label: Mapped[str | None] = mapped_column(nullable=True)  # first ### heading, for weak_patterns
     time_budget_min: Mapped[int]
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

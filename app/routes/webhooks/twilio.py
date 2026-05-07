@@ -12,7 +12,7 @@ from app.integrations.github_client import commit_file, load_vault_context, list
 from app.lib.user_context import get_user_context as _get_ctx
 from sqlalchemy import select
 
-from app.db.models import MockSession, PrepPlan
+from app.db.models import MockSession
 from app.db.repos.interviews import InterviewRepository
 from app.db.repos.mock_sessions import MockSessionRepository
 from app.db.repos.prep_plans import PrepPlanRepository
@@ -35,6 +35,13 @@ from app.tools.research_company import research_company
 
 _orchestrator = MockOrchestrator()
 _tutor = Tutor()
+
+
+def _first_heading(plan_md: str) -> str | None:
+    for line in plan_md.splitlines():
+        if line.strip().startswith("### "):
+            return line.strip().lstrip("# ").strip()
+    return None
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -161,6 +168,20 @@ async def _execute_prep(sender: str, intent: PrepIntent) -> str:
     single_round_type = round_types[0] if len(round_types) == 1 else None
 
     if match:
+        # Idempotency: skip LLM if there's already a pending plan and the date hasn't changed.
+        async with async_session_factory() as session:
+            pending_plan = await PrepPlanRepository(session).get_pending(match.id)
+        date_changed = (
+            final.interview_date
+            and match.scheduled_for
+            and match.scheduled_for.date().isoformat() != final.interview_date
+        )
+        if pending_plan and not date_changed:
+            return (
+                f"Active plan for {match.company} already exists.\n"
+                f"Send 'done easy/medium/hard' to complete it, or add 'refresh' to regenerate."
+            )
+
         effective_role = match.role if match.role != "Unknown" else role
         rounds = match.round_types
         research = await run_research(match.company, effective_role, round_type=single_round_type, round_label=round_label)
@@ -171,13 +192,14 @@ async def _execute_prep(sender: str, intent: PrepIntent) -> str:
             round_types=rounds,
             research_context=research,
         )
+        vault_path = await _commit_plan_to_vault(match.id, match.company, plan_md, research, round_label=round_label or single_round_type)
         async with async_session_factory() as session:
             await PrepPlanRepository(session).create(
                 interview_id=match.id,
-                plan_md=plan_md,
                 time_budget_min=120,
+                vault_path=vault_path,
+                drill_label=_first_heading(plan_md),
             )
-        await _commit_plan_to_vault(match.id, match.company, plan_md, research, round_label=round_label or single_round_type)
         return f"Researching & planning {match.company} ({effective_role}):\n\n{plan_md[:1200]}…\n\n(Full plan + sources in prep-vault)"
 
     async with async_session_factory() as session:
@@ -196,15 +218,14 @@ async def _execute_prep(sender: str, intent: PrepIntent) -> str:
         round_types=round_types,
         research_context=research,
     )
-
+    vault_path = await _commit_plan_to_vault(interview.id, company, plan_md, research, round_label=round_label or single_round_type)
     async with async_session_factory() as session:
         await PrepPlanRepository(session).create(
             interview_id=interview.id,
-            plan_md=plan_md,
             time_budget_min=120,
+            vault_path=vault_path,
+            drill_label=_first_heading(plan_md),
         )
-
-    await _commit_plan_to_vault(interview.id, company, plan_md, research, round_label=round_label or single_round_type)
     date_str = f" on {final.interview_date}" if final.interview_date else ""
     return f"Plan for {company} ({role}){date_str}:\n\n{plan_md[:1200]}…\n\n(Full plan + sources in prep-vault)"
 
@@ -215,7 +236,8 @@ async def _commit_plan_to_vault(
     plan_md: str,
     research: str = "",
     round_label: str | None = None,
-) -> None:
+) -> str | None:
+    """Commit plan (and optionally research) to vault. Returns plan path on success, None on failure."""
     import time as _time
     try:
         ctx = await _get_ctx()
@@ -223,8 +245,9 @@ async def _commit_plan_to_vault(
         round_slug = (round_label or "general").lower().replace(" ", "-")
         epoch = int(_time.time())
         base = f"{company_slug}/{round_slug}/{epoch}"
+        plan_path = f"{base}-plan.md"
         await commit_file(
-            path=f"{base}-plan.md",
+            path=plan_path,
             content=plan_md,
             message=f"plan: {company} — {round_label or 'general'} #{interview_id}",
             github_token=ctx.github_token,
@@ -238,8 +261,10 @@ async def _commit_plan_to_vault(
                 github_token=ctx.github_token,
                 vault_repo=ctx.vault_repo,
             )
+        return plan_path
     except Exception as exc:
         logger.warning("twilio.vault_commit_failed", interview_id=interview_id, error=str(exc), exc_info=True)
+        return None
 
 
 async def _handle_mock(sender: str, args: list[str]) -> str:
@@ -366,7 +391,9 @@ async def _handle_done(sender: str, args: list[str]) -> str:
     if interview is None and len(interviews) == 1:
         interview = interviews[0]
     if interview is None:
-        options = "\n".join(f"  • {i.company} ({i.role})" for i in interviews)
+        options = "\n".join(
+            f"  • {i.company} — {', '.join(i.round_types)} ({i.role})" for i in interviews
+        )
         pending = {"_command": "done", "rating": rating}
         async with async_session_factory() as session:
             await WaWindowRepository(session).set_pending_prep(sender, pending)
@@ -377,17 +404,7 @@ async def _handle_done(sender: str, args: list[str]) -> str:
 
 async def _execute_done(interview, rating: str) -> str:
     async with async_session_factory() as session:
-        result = await session.execute(
-            select(PrepPlan)
-            .where(
-                PrepPlan.interview_id == interview.id,
-                PrepPlan.completed_at.is_(None),
-                PrepPlan.skipped.is_(False),
-            )
-            .order_by(PrepPlan.generated_at.desc())
-            .limit(1)
-        )
-        plan = result.scalar_one_or_none()
+        plan = await PrepPlanRepository(session).get_pending(interview.id)
 
     if not plan:
         return f"No pending drill for {interview.company}. Get a plan first: prep {interview.company}"

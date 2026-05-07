@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import PrepPlan
@@ -13,12 +13,24 @@ class PrepPlanRepository:
     async def create(
         self,
         interview_id: int,
-        plan_md: str,
         time_budget_min: int,
+        vault_path: str | None = None,
+        drill_label: str | None = None,
     ) -> PrepPlan:
+        # Supersede any existing pending plans so done always targets exactly one active plan.
+        await self._session.execute(
+            update(PrepPlan)
+            .where(
+                PrepPlan.interview_id == interview_id,
+                PrepPlan.completed_at.is_(None),
+                PrepPlan.skipped.is_(False),
+            )
+            .values(skipped=True)
+        )
         plan = PrepPlan(
             interview_id=interview_id,
-            plan_md=plan_md,
+            vault_path=vault_path,
+            drill_label=drill_label,
             time_budget_min=time_budget_min,
             generated_at=datetime.now(timezone.utc),
         )
@@ -26,6 +38,19 @@ class PrepPlanRepository:
         await self._session.commit()
         await self._session.refresh(plan)
         return plan
+
+    async def get_pending(self, interview_id: int) -> PrepPlan | None:
+        result = await self._session.execute(
+            select(PrepPlan)
+            .where(
+                PrepPlan.interview_id == interview_id,
+                PrepPlan.completed_at.is_(None),
+                PrepPlan.skipped.is_(False),
+            )
+            .order_by(PrepPlan.generated_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def mark_complete(self, id: int, rating: str) -> PrepPlan:
         result = await self._session.execute(select(PrepPlan).where(PrepPlan.id == id))

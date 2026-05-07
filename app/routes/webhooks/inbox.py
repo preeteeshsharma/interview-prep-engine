@@ -18,6 +18,13 @@ from app.tools.classify_rounds import classify_rounds
 from app.tools.generate_plan import generate_plan
 
 router = APIRouter()
+
+
+def _first_heading(plan_md: str) -> str | None:
+    for line in plan_md.splitlines():
+        if line.strip().startswith("### "):
+            return line.strip().lstrip("# ").strip()
+    return None
 logger = get_logger(__name__)
 
 _background_tasks: set[asyncio.Task] = set()
@@ -110,25 +117,28 @@ async def _run_pipeline(payload: MailgunInbound) -> None:
         round_types=rounds,
     )
 
-    async with async_session_factory() as session:
-        await PrepPlanRepository(session).create(
-            interview_id=interview_id,
-            plan_md=plan_md,
-            time_budget_min=120,
-        )
-
-    vault_path = f"plans/{company.lower().replace(' ', '-')}-{interview_id}.md"
+    vault_path_str = f"plans/{company.lower().replace(' ', '-')}-{interview_id}.md"
+    committed_path: str | None = None
     try:
         sha = await commit_file(
-            path=vault_path,
+            path=vault_path_str,
             content=plan_md,
             message=f"prep: {company} — {role} (interview #{interview_id})",
             github_token=ctx.github_token,
             vault_repo=ctx.vault_repo,
         )
-        logger.info("inbox.committed", path=vault_path, sha=sha)
+        committed_path = vault_path_str
+        logger.info("inbox.committed", path=vault_path_str, sha=sha)
     except Exception as exc:
-        logger.warning("inbox.vault_commit_failed", path=vault_path, error=str(exc), exc_info=True)
+        logger.warning("inbox.vault_commit_failed", path=vault_path_str, error=str(exc), exc_info=True)
+
+    async with async_session_factory() as session:
+        await PrepPlanRepository(session).create(
+            interview_id=interview_id,
+            time_budget_min=120,
+            vault_path=committed_path,
+            drill_label=_first_heading(plan_md),
+        )
 
 
 async def _bg_pipeline(payload: MailgunInbound) -> None:
