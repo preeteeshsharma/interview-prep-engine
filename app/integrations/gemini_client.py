@@ -62,6 +62,63 @@ class GeminiProvider:
     def _has_web_search(tools: list[dict]) -> bool:
         return any(t.get("type") == "web_search_20250305" or t.get("name") == "web_search" for t in tools)
 
+    @staticmethod
+    def _schema_to_gemini(schema: dict):
+        """Recursively convert an Anthropic JSON Schema dict to a Gemini types.Schema."""
+        from google.genai import types
+
+        _TYPE_MAP = {
+            "string": "STRING", "number": "NUMBER", "integer": "INTEGER",
+            "boolean": "BOOLEAN", "array": "ARRAY", "object": "OBJECT",
+        }
+        kwargs: dict = {
+            "type": _TYPE_MAP.get((schema.get("type") or "string").lower(), "STRING"),
+        }
+        if "description" in schema:
+            kwargs["description"] = schema["description"]
+        if "properties" in schema:
+            kwargs["properties"] = {
+                k: GeminiProvider._schema_to_gemini(v)
+                for k, v in schema["properties"].items()
+            }
+        if "required" in schema:
+            kwargs["required"] = schema["required"]
+        if "items" in schema:
+            kwargs["items"] = GeminiProvider._schema_to_gemini(schema["items"])
+        if "enum" in schema:
+            kwargs["enum"] = schema["enum"]
+        return types.Schema(**kwargs)
+
+    @staticmethod
+    def _convert_tools(tools: list[dict]):
+        """Convert a list of Anthropic tool defs to Gemini Tool objects.
+
+        web_search_20250305  → google_search grounding tool
+        function tools       → FunctionDeclaration (one Tool per batch)
+        """
+        from google.genai import types
+
+        gemini_tools = []
+        function_decls = []
+
+        for tool in tools:
+            if tool.get("type") == "web_search_20250305" or tool.get("name") == "web_search":
+                gemini_tools.append(types.Tool(google_search=types.GoogleSearch()))
+            elif "name" in tool:
+                schema = tool.get("input_schema", {"type": "object", "properties": {}})
+                function_decls.append(
+                    types.FunctionDeclaration(
+                        name=tool["name"],
+                        description=tool.get("description", ""),
+                        parameters=GeminiProvider._schema_to_gemini(schema),
+                    )
+                )
+
+        if function_decls:
+            gemini_tools.append(types.Tool(function_declarations=function_decls))
+
+        return gemini_tools or None
+
     async def complete(
         self,
         messages: list[dict],
@@ -110,10 +167,7 @@ class GeminiProvider:
     ) -> str:
         from google.genai import types
 
-        gemini_tools = None
-        if self._has_web_search(tools):
-            # Anthropic web_search_20250305 → Gemini Google Search grounding.
-            gemini_tools = [types.Tool(google_search=types.GoogleSearch())]
+        gemini_tools = self._convert_tools(tools)
 
         config = types.GenerateContentConfig(
             system_instruction=system,

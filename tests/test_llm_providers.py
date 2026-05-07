@@ -183,6 +183,88 @@ def test_gemini_to_contents_handles_list_content():
     assert contents[0]["parts"][0]["text"] == "hello"
 
 
+def test_gemini_convert_tools_web_search_only():
+    from google.genai import types
+    from app.integrations.gemini_client import GeminiProvider
+
+    result = GeminiProvider._convert_tools([{"type": "web_search_20250305", "name": "web_search"}])
+    assert result is not None
+    assert len(result) == 1
+    assert isinstance(result[0], types.Tool)
+    assert result[0].google_search is not None
+
+
+def test_gemini_convert_tools_function_tool():
+    from google.genai import types
+    from app.integrations.gemini_client import GeminiProvider
+
+    tools = [{
+        "name": "get_weather",
+        "description": "Get weather for a city",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "City name"},
+                "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]},
+            },
+            "required": ["location"],
+        },
+    }]
+    result = GeminiProvider._convert_tools(tools)
+    assert result is not None
+    assert len(result) == 1
+    decl = result[0].function_declarations[0]
+    assert decl.name == "get_weather"
+    assert decl.description == "Get weather for a city"
+    assert "location" in decl.parameters.properties
+    assert decl.parameters.required == ["location"]
+
+
+def test_gemini_convert_tools_mixed_web_search_and_function():
+    from google.genai import types
+    from app.integrations.gemini_client import GeminiProvider
+
+    tools = [
+        {"type": "web_search_20250305", "name": "web_search"},
+        {
+            "name": "save_note",
+            "description": "Save a note",
+            "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+        },
+    ]
+    result = GeminiProvider._convert_tools(tools)
+    assert result is not None
+    # web search and function declarations are separate Tool objects
+    tool_types = {("google_search" if t.google_search else "function") for t in result}
+    assert "google_search" in tool_types
+    assert "function" in tool_types
+
+
+def test_gemini_convert_tools_empty_returns_none():
+    from app.integrations.gemini_client import GeminiProvider
+    assert GeminiProvider._convert_tools([]) is None
+
+
+def test_gemini_schema_to_gemini_recursive():
+    from google.genai import types
+    from app.integrations.gemini_client import GeminiProvider
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+    }
+    result = GeminiProvider._schema_to_gemini(schema)
+    assert result.type.name == "OBJECT"
+    items_prop = result.properties["items"]
+    assert items_prop.type.name == "ARRAY"
+    assert items_prop.items.type.name == "STRING"
+
+
 def test_gemini_has_web_search_detects_anthropic_tool():
     from app.integrations.gemini_client import GeminiProvider
     assert GeminiProvider._has_web_search([{"type": "web_search_20250305", "name": "web_search"}])
@@ -273,7 +355,9 @@ async def test_gemini_complete_with_tools_adds_google_search_for_web_search():
 
 
 @pytest.mark.asyncio
-async def test_gemini_complete_with_tools_passes_none_when_no_web_search():
+async def test_gemini_complete_with_tools_converts_function_tool():
+    from google.genai import types
+
     mock_response = MagicMock(text="ok")
     mock_client = MagicMock()
     mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
@@ -284,13 +368,15 @@ async def test_gemini_complete_with_tools_passes_none_when_no_web_search():
     await provider.complete_with_tools(
         [{"role": "user", "content": "hi"}],
         system="sys",
-        tools=[{"name": "my_custom_tool"}],  # not a web search tool
+        tools=[{"name": "my_custom_tool", "description": "does something",
+                "input_schema": {"type": "object", "properties": {}}}],
     )
 
     call_kwargs = mock_client.aio.models.generate_content.call_args
-    from google.genai import types
     config: types.GenerateContentConfig = call_kwargs.kwargs["config"]
-    assert config.tools is None
+    # Custom function tool must be converted to a FunctionDeclaration, not dropped.
+    assert config.tools is not None
+    assert config.tools[0].function_declarations[0].name == "my_custom_tool"
 
 
 @pytest.mark.asyncio
