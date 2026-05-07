@@ -210,8 +210,21 @@ async def _handle_mock(sender: str, args: list[str]) -> str:
 async def _execute_mock(sender: str, interview, round_type: str) -> str:
     ctx = await _get_ctx()
     company_slug = interview.company.lower().replace(" ", "-")
+
+    async with async_session_factory() as session:
+        db_plan = await PrepPlanRepository(session).get_pending(interview.id)
+
+    if not db_plan or not db_plan.vault_path:
+        return (
+            f"No prep found for {interview.company} ({round_type}). "
+            f"Run 'prep {interview.company.lower()} <date>' first."
+        )
+
+    parts = db_plan.vault_path.split("/")
+    vault_round_slug = parts[1] if len(parts) >= 3 else round_type
+
     research, plan = await load_vault_context(
-        company_slug, round_type,
+        company_slug, vault_round_slug,
         github_token=ctx.github_token, vault_repo=ctx.vault_repo,
     )
 
