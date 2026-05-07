@@ -41,7 +41,7 @@ _HELP = (
 
 # Derived from the domain's RoundType; exclude rounds with no mock handler.
 _MOCK_ROUNDS: set[str] = {r.lower() for r in get_args(RoundType)} - {"hiring_manager", "unknown"}
-_DEFAULT_ROUND_TYPES: list[str] = _DEFAULT_ROUND_TYPES
+_DEFAULT_ROUND_TYPES: list[str] = [r for r in get_args(RoundType) if r not in {"hiring_manager", "unknown"}]
 
 
 # ---------------------------------------------------------------------------

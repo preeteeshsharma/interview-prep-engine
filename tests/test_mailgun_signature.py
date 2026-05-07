@@ -105,6 +105,7 @@ def test_is_registration_false_for_normal_email():
     assert _is_registration(payload) is False
 
 
-def test_is_registration_false_for_empty_subject():
-    payload = MailgunInbound(sender="user@example.com", subject="", body_plain="")
-    assert _is_registration(payload) is False
+def test_mailgun_inbound_rejects_empty_subject():
+    """Empty subject is rejected at schema level — never reaches _is_registration."""
+    with pytest.raises(Exception):  # pydantic ValidationError
+        MailgunInbound(sender="user@example.com", subject="", body_plain="")
