@@ -64,6 +64,20 @@ the pattern being drilled, not just the problem name. ~45–60 min per problem.
     Phase 5 (~5 min): Extensibility — show the single class that changes for a new requirement
   Total: ~35–40 min per LLD problem.
 
+**machine_coding** — Timed end-to-end implementation: working, runnable code in 60–90 min.
+  Pick problems that match the company's domain:
+  logistics/supply chain → Cab booking, Delivery slot allocator, Route optimizer
+  infra/SaaS → Rate limiter, Task scheduler, Notification dispatcher
+  consumer → Parking lot, Library management, Movie ticket booking, Food ordering
+
+  Structure every machine coding session:
+    Step 1 (~5 min): Read problem, list entities and key operations, ask clarifying questions
+    Step 2 (~10 min): Design classes and interfaces on paper — no code yet
+    Step 3 (~40 min): Implement core happy path; get it compiling and passing basic cases
+    Step 4 (~15 min): Edge cases, error handling, concurrency considerations if asked
+  Evaluation criteria: working code > clean code > extensibility. Ship first, refactor second.
+  Total: ~60–90 min per problem.
+
 **sysdesign** — Pick problems relevant to what the company actually builds:
   Zapier → design a workflow automation engine / webhook delivery system
   Stripe → design a payment processing pipeline / idempotent API gateway
@@ -114,10 +128,10 @@ Output ONLY valid markdown starting with the heading. No preamble outside the ma
 
 ## Rules
 - Cover every round type fully — do not skip or summarise drills to save space
-- Spread drills across available days; front-load harder rounds (DSA, LLD, sysdesign)
-- Schedule harder rounds (DSA, LLD, sysdesign) earlier in the plan
-- Never exceed per-drill time limits: DSA 60 min, LLD 40 min, sysdesign 60 min,
-  behavioral 20 min, hiring_manager 30 min
+- Spread drills across available days; front-load harder rounds (DSA, LLD, machine_coding, sysdesign)
+- Schedule harder rounds (DSA, LLD, machine_coding, sysdesign) earlier in the plan
+- Never exceed per-drill time limits: DSA 60 min, LLD 40 min, machine_coding 90 min,
+  sysdesign 60 min, behavioral 20 min, hiring_manager 30 min
 - Prioritise drills that address weak_patterns
 - Be specific — never write "practice more" or "review concepts"
 - For DSA always include the LeetCode problem number

@@ -40,7 +40,7 @@ logger = get_logger(__name__)
 _HELP = (
     "Commands:\n"
     "  prep <company>              — generate a prep plan\n"
-    "  mock <round>                — start a mock (dsa/lld/sysdesign/behavioral)\n"
+    "  mock <round>                — start a mock (dsa/lld/machine_coding/sysdesign/behavioral)\n"
     "  done <rating>               — mark drill complete (easy/medium/hard)\n"
     "  status                      — show active interviews\n"
     "  reschedule <company> <date> — update interview date"

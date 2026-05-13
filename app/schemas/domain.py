@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-RoundType = Literal["DSA", "LLD", "sysdesign", "behavioral", "hiring_manager", "unknown"]
+RoundType = Literal["DSA", "LLD", "machine_coding", "sysdesign", "behavioral", "hiring_manager", "unknown"]
 Rating = Literal["easy", "medium", "hard"]
 
 

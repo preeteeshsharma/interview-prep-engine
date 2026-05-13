@@ -30,8 +30,9 @@ _ROUND_ALIAS_MAP: list[tuple[str, str]] = [
     ("low level design", "LLD"),
     ("object oriented design", "LLD"),
     ("oo design", "LLD"),
-    ("machine coding", "LLD"),
     ("object design", "LLD"),
+    ("machine coding", "machine_coding"),
+    ("machine code", "machine_coding"),
     ("system design", "sysdesign"),
     ("high level design", "sysdesign"),
     ("architecture round", "sysdesign"),
@@ -78,8 +79,8 @@ Round mapping — map any mention to the canonical type (use exact strings below
 - "DSA": "coding", "algorithms", "data structures", "problem solving",
          "coding ability", "coding ability and problem solving", "leetcode",
          "technical screen", "coding round", "coding interview"
-- "LLD": "low level design", "object oriented design", "oo design",
-         "machine coding", "object design"
+- "LLD": "low level design", "object oriented design", "oo design", "object design"
+- "machine_coding": "machine coding", "machine code"
 - "sysdesign": "system design", "hld", "high level design",
                "architecture", "design round"
 - "behavioral": "behavioural", "values", "hr round", "culture fit",
@@ -113,7 +114,7 @@ class PrepIntent:
         if not self.interview_date:
             gaps.append("interview date (e.g. 'june 15')")
         if not self.rounds:
-            gaps.append("rounds (dsa / lld / sysdesign / behavioral / hiring_manager)")
+            gaps.append("rounds (dsa / lld / machine_coding / sysdesign / behavioral / hiring_manager)")
         return gaps
 
     def with_defaults(self) -> "PrepIntent":
