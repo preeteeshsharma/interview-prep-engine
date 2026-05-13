@@ -17,7 +17,7 @@ class InterviewRepository:
         scheduled_for: datetime | None = None,
     ) -> Interview:
         interview = Interview(
-            company=company,
+            company=company.strip().title(),
             role=role,
             round_type=round_type,
             scheduled_for=scheduled_for,
