@@ -150,18 +150,22 @@ async def _handle_prep(sender: str, args: list[str], payload: TwilioInbound) -> 
 
     user_research = ""
 
-    # PDF attachment takes priority over pasted text.
-    if payload.NumMedia != "0" and payload.MediaUrl0:
-        content_type = payload.MediaContentType0 or ""
-        if "pdf" in content_type or payload.MediaUrl0.lower().endswith(".pdf"):
+    # PDF attachments take priority over pasted text — concatenate all.
+    pdf_parts: list[str] = []
+    for url, content_type in payload.media_items:
+        if "pdf" in content_type or url.lower().endswith(".pdf"):
             try:
-                user_research = await extract_text_from_pdf_url(
-                    payload.MediaUrl0,
+                text = await extract_text_from_pdf_url(
+                    url,
                     auth=(settings.twilio_account_sid, settings.twilio_auth_token),
                 )
-                logger.info("_handle_prep.pdf_extracted", chars=len(user_research))
+                if text:
+                    pdf_parts.append(text)
             except Exception as exc:
-                logger.warning("_handle_prep.pdf_failed", error=str(exc), exc_info=True)
+                logger.warning("_handle_prep.pdf_failed", url=url, error=str(exc), exc_info=True)
+    if pdf_parts:
+        user_research = "\n\n---\n\n".join(pdf_parts)
+        logger.info("_handle_prep.pdf_extracted", files=len(pdf_parts), chars=len(user_research))
 
     # Pasted text below the command line (only on refresh; >100 chars to ignore noise).
     if not user_research and refresh:
@@ -567,13 +571,17 @@ async def twilio_webhook(request: Request) -> Response:
     params = dict(form_data)
     _validate_twilio_signature(request, params)
 
+    num_media = int(params.get("NumMedia", "0"))
+    media_items = [
+        (params[f"MediaUrl{i}"], params.get(f"MediaContentType{i}", ""))
+        for i in range(num_media)
+        if params.get(f"MediaUrl{i}")
+    ]
     payload = TwilioInbound(
         From=params.get("From", ""),
         Body=params.get("Body", ""),
         MessageSid=params.get("MessageSid", ""),
-        NumMedia=params.get("NumMedia", "0"),
-        MediaUrl0=params.get("MediaUrl0"),
-        MediaContentType0=params.get("MediaContentType0"),
+        media_items=media_items,
     )
     logger.info("twilio.inbound", from_=payload.From, message_sid=payload.MessageSid)
 
