@@ -61,7 +61,7 @@ async def commit_plan_to_vault(
         return None
 
 
-async def execute_prep(intent: PrepIntent, refresh: bool = False) -> str:
+async def execute_prep(intent: PrepIntent, refresh: bool = False, user_research: str = "") -> str:
     """Research + plan for a resolved PrepIntent. Used by WhatsApp prep and email inbox."""
     final = intent.with_defaults()
     company = final.company or "Unknown"
@@ -107,7 +107,11 @@ async def execute_prep(intent: PrepIntent, refresh: bool = False) -> str:
     first_interview = interviews_to_run[0][0]
     effective_role = first_interview.role if first_interview.role != "Unknown" else role
 
-    research = await run_research(company, effective_role, round_type=single_round_type, round_label=round_label)
+    if user_research:
+        research = user_research
+        logger.info("execute_prep.user_research", company=company, chars=len(research))
+    else:
+        research = await run_research(company, effective_role, round_type=single_round_type, round_label=round_label)
     plan_md = await generate_plan(
         interview_id=first_interview.id,
         company=company,

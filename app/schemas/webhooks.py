@@ -7,6 +7,9 @@ class TwilioInbound(BaseModel):
     From: str = Field(min_length=1)
     Body: str
     MessageSid: str = Field(min_length=1)
+    NumMedia: str = "0"
+    MediaUrl0: str | None = None
+    MediaContentType0: str | None = None
 
 
 class MailgunInbound(BaseModel):

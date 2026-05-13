@@ -26,6 +26,7 @@ from app.schemas.domain import RoundType
 from app.schemas.webhooks import TwilioInbound
 from app.agents.orchestrator import MockOrchestrator
 from app.agents.tutor import Tutor
+from app.lib.pdf_extractor import extract_text_from_pdf_url
 from app.lib.prep_pipeline import execute_prep, _first_heading
 from app.tools.parse_prep_intent import PrepIntent, _map_label_to_round, parse_prep_intent
 from app.tools.record_completion import record_completion
@@ -126,7 +127,7 @@ async def _ask_which_interview(sender: str, interviews: list, command: str, roun
 # Intent handlers
 # ---------------------------------------------------------------------------
 
-async def _handle_prep(sender: str, args: list[str]) -> str:
+async def _handle_prep(sender: str, args: list[str], payload: TwilioInbound) -> str:
     refresh = any(a.lower() == "refresh" for a in args)
     raw_message = " ".join(a for a in args if a.lower() != "refresh") if args else ""
     if not raw_message:
@@ -147,7 +148,31 @@ async def _handle_prep(sender: str, args: list[str]) -> str:
         gap_str = "\n  • ".join(gaps)
         return f"Got it. Still need:\n  • {gap_str}\n\nReply with the missing details."
 
-    return await execute_prep(intent, refresh=refresh)
+    user_research = ""
+
+    # PDF attachment takes priority over pasted text.
+    if payload.NumMedia != "0" and payload.MediaUrl0:
+        content_type = payload.MediaContentType0 or ""
+        if "pdf" in content_type or payload.MediaUrl0.lower().endswith(".pdf"):
+            try:
+                user_research = await extract_text_from_pdf_url(
+                    payload.MediaUrl0,
+                    auth=(settings.twilio_account_sid, settings.twilio_auth_token),
+                )
+                logger.info("_handle_prep.pdf_extracted", chars=len(user_research))
+            except Exception as exc:
+                logger.warning("_handle_prep.pdf_failed", error=str(exc), exc_info=True)
+
+    # Pasted text below the command line (only on refresh; >100 chars to ignore noise).
+    if not user_research and refresh:
+        body = payload.Body
+        command_line = body.strip().split("\n")[0]
+        extra = body[len(command_line):].strip()
+        if len(extra) > 100:
+            user_research = extra
+            logger.info("_handle_prep.text_research", chars=len(user_research))
+
+    return await execute_prep(intent, refresh=refresh, user_research=user_research)
 
 
 async def _handle_prep_followup(sender: str, pending: dict, body: str) -> str:
@@ -513,7 +538,7 @@ async def _route(payload: TwilioInbound) -> str:
     logger.info("twilio.intent", sender=sender, intent=intent, args=args)
 
     if intent == "prep":
-        return await _handle_prep(sender, args)
+        return await _handle_prep(sender, args, payload)
     if intent == "mock":
         return await _handle_mock(sender, args)
     if intent == "done":
@@ -546,6 +571,9 @@ async def twilio_webhook(request: Request) -> Response:
         From=params.get("From", ""),
         Body=params.get("Body", ""),
         MessageSid=params.get("MessageSid", ""),
+        NumMedia=params.get("NumMedia", "0"),
+        MediaUrl0=params.get("MediaUrl0"),
+        MediaContentType0=params.get("MediaContentType0"),
     )
     logger.info("twilio.inbound", from_=payload.From, message_sid=payload.MessageSid)
 
