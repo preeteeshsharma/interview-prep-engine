@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from typing import get_args
 
 from fastapi import APIRouter, HTTPException, Request
@@ -37,10 +38,11 @@ logger = get_logger(__name__)
 
 _HELP = (
     "Commands:\n"
-    "  prep <company> — generate a prep plan\n"
-    "  mock <round>   — start a mock (dsa/lld/sysdesign/behavioral)\n"
-    "  done <rating>  — mark drill complete (easy/medium/hard)\n"
-    "  status         — show active interviews"
+    "  prep <company>              — generate a prep plan\n"
+    "  mock <round>                — start a mock (dsa/lld/sysdesign/behavioral)\n"
+    "  done <rating>               — mark drill complete (easy/medium/hard)\n"
+    "  status                      — show active interviews\n"
+    "  reschedule <company> <date> — update interview date"
 )
 
 _MOCK_ROUNDS: set[str] = {r.lower() for r in get_args(RoundType)} - {"hiring_manager", "unknown"}
@@ -65,7 +67,7 @@ def _parse_intent(body: str) -> tuple[str, list[str]]:
         return "unknown", []
     verb = parts[0].lower()
     rest = parts[1].split() if len(parts) > 1 else []
-    if verb in {"prep", "mock", "done", "status", "study", "link"}:
+    if verb in {"prep", "mock", "done", "status", "study", "link", "reschedule"}:
         return verb, rest
     return "freeform", parts
 
@@ -90,13 +92,27 @@ async def _list_active_interviews() -> list:
 
 
 async def _get_vault_round(interview_id: int, fallback: str = "general") -> tuple:
-    """Return (PrepPlan | None, round_slug). Extracts slug from vault_path stored in DB."""
+    """Return (PrepPlan | None, round_slug). Prefers structured vault_path for the slug.
+
+    Daily drill plans use a 2-segment path (plans/company-date.md) whose second segment
+    is not a round slug. When the pending plan has that format, look up the original
+    structured plan (company/round/epoch-plan.md) for the correct slug.
+    """
     async with async_session_factory() as session:
         plan = await PrepPlanRepository(session).get_pending(interview_id)
     if not plan or not plan.vault_path:
         return plan, fallback
     parts = plan.vault_path.split("/")
-    return plan, parts[1] if len(parts) >= 3 else fallback
+    if len(parts) == 3:
+        return plan, parts[1]
+    # Daily-format path — look up the structured plan for the correct round slug.
+    async with async_session_factory() as session:
+        structured = await PrepPlanRepository(session).get_structured(interview_id)
+    if structured and structured.vault_path:
+        sparts = structured.vault_path.split("/")
+        if len(sparts) == 3:
+            return plan, sparts[1]
+    return plan, fallback
 
 
 async def _ask_which_interview(sender: str, interviews: list, command: str, round_hint: str | None = None) -> str:
@@ -436,6 +452,35 @@ async def _handle_link(sender: str, args: list[str]) -> str:
     return "Multi-user linking coming in V2. You're already set up as the owner."
 
 
+async def _handle_reschedule(sender: str, args: list[str]) -> str:
+    raw = " ".join(args)
+    if not raw:
+        return "Usage: reschedule <company> [round] <new date>\n  e.g. reschedule moveworks dsa june 20"
+
+    intent = await parse_prep_intent(raw)
+    if not intent.interview_date:
+        return "Couldn't parse a date. Try: reschedule moveworks dsa june 20"
+
+    interviews = await _list_active_interviews()
+    company_hint = intent.company
+    round_hint = (intent.rounds or [None])[0]
+    interview = _resolve_interview(interviews, company_hint, round_hint)
+    if interview is None:
+        if not interviews:
+            return "No active interviews found."
+        return await _ask_which_interview(sender, interviews, "reschedule")
+
+    try:
+        new_date = datetime.strptime(intent.interview_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return f"Couldn't parse date '{intent.interview_date}'."
+
+    async with async_session_factory() as session:
+        updated = await InterviewRepository(session).update_scheduled_for(interview.id, new_date)
+
+    return f"Updated: {updated.company} ({updated.round_type}) → {intent.interview_date}"
+
+
 # ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
@@ -452,7 +497,7 @@ async def _route(payload: TwilioInbound) -> str:
 
     if pending:
         verb = body.strip().split()[0].lower() if body.strip() else ""
-        if verb not in {"prep", "mock", "done", "status", "study", "link"}:
+        if verb not in {"prep", "mock", "done", "status", "study", "link", "reschedule"}:
             command = pending.get("_command", "prep")
             if command == "mock":
                 return await _handle_mock_followup(sender, pending, body)
@@ -479,6 +524,8 @@ async def _route(payload: TwilioInbound) -> str:
         return await _handle_study(sender, args)
     if intent == "link":
         return await _handle_link(sender, args)
+    if intent == "reschedule":
+        return await _handle_reschedule(sender, args)
     if intent == "freeform":
         return await _handle_freeform(sender, body)
     return _HELP

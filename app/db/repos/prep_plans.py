@@ -67,6 +67,24 @@ class PrepPlanRepository:
         await self._session.refresh(plan)
         return plan
 
+    async def get_structured(self, interview_id: int) -> PrepPlan | None:
+        """Return the earliest PrepPlan with a 3-segment vault_path (company/round/epoch-plan.md).
+
+        Daily drill plans use a 2-segment path (plans/company-date.md). This finds the
+        original structured plan committed during `prep`, which holds the correct round slug
+        and the generation date needed to compute Day N.
+        """
+        result = await self._session.execute(
+            select(PrepPlan)
+            .where(
+                PrepPlan.interview_id == interview_id,
+                PrepPlan.vault_path.like("%/%/%"),
+            )
+            .order_by(PrepPlan.generated_at.asc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def recent_completed(self, interview_id: int, days: int = 7, user_email: str | None = None) -> list[PrepPlan]:
         # user_email filter added in V2 after migration.
         cutoff = datetime.now(timezone.utc).replace(

@@ -1,9 +1,37 @@
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 
 from app.integrations.llm_client import complete
 from app.lib.logging import get_logger
+
+
+async def _extract_confirmed_questions(research: str) -> list[str]:
+    """Return a flat list of confirmed interview questions extracted from research."""
+    if not research:
+        return []
+    result = await complete(
+        messages=[{"role": "user", "content": (
+            "Extract every confirmed interview question from this research. "
+            "Return one question per line — no bullets, no numbering, no commentary.\n\n"
+            f"{research}"
+        )}],
+        system="Extract only. One confirmed question per line. No commentary.",
+        model="claude-haiku-4-5-20251001",
+        max_tokens=800,
+    )
+    return [line.strip() for line in result.strip().splitlines() if line.strip()]
+
+
+def _assign_to_days(questions: list[str], days: int) -> list[list[str]]:
+    """Distribute questions across days using round-robin so each day is balanced."""
+    if not questions or days <= 0:
+        return []
+    buckets: list[list[str]] = [[] for _ in range(days)]
+    for i, q in enumerate(questions):
+        buckets[i % days].append(q)
+    return [b for b in buckets if b]
 
 logger = get_logger(__name__)
 
@@ -113,13 +141,11 @@ async def generate_plan(
 
     weak_section = "\n".join(f"- {p}" for p in weak_patterns) if weak_patterns else "None identified yet."
 
-    # Cap research to ~8000 chars — researcher outputs 5–8k, pass it in full.
-    research_trimmed = research_context[:8000] + ("…" if len(research_context) > 8000 else "")
     research_section = (
-        f"\n\n## Live research — real interview reports\n\n{research_trimmed}"
-        f"\n\n**Important:** If the research above contains specific questions asked at "
-        f"{company}, use those exact questions as drill material for the relevant rounds. "
-        f"Do not substitute generic problems when real questions are available."
+        f"\n\n## Live research — real interview reports\n\n{research_context}"
+        f"\n\n**Required:** Every confirmed question listed in the research above MUST appear "
+        f"as a dedicated drill in the plan. Do not substitute or omit any confirmed question. "
+        f"Generic problems may fill remaining days only after all confirmed questions are scheduled."
         if research_context
         else ""
     )
@@ -136,12 +162,34 @@ Weak patterns to prioritise:
 {weak_section}{research_section}
 """
 
+    # Pre-assign confirmed questions to days so coverage is deterministic.
+    confirmed = await _extract_confirmed_questions(research_context)
+    if confirmed:
+        day_count = max(days_until_interview, 1)
+        assignments = _assign_to_days(confirmed, day_count)
+        schedule = "\n\n## Required day schedule — follow exactly\n" + "\n".join(
+            f"Day {i + 1}: {' | '.join(qs)}" for i, qs in enumerate(assignments)
+        )
+        user_msg += schedule
+
     plan_md = await complete(
         messages=[{"role": "user", "content": user_msg}],
         system=_SYSTEM,
         model="claude-haiku-4-5-20251001",
-        max_tokens=4000,
+        max_tokens=6000,
     )
 
+    plan_md = _fix_header(plan_md, interview_date, today)
     logger.info("generate_plan.done", interview_id=interview_id, company=company, rounds=round_types)
+    return plan_md
+
+
+def _fix_header(plan_md: str, interview_date: str, today: str) -> str:
+    """Replace LLM-generated header date lines with Python-computed values.
+
+    Haiku hallucinates past-year dates for 2026 timestamps (beyond training cutoff).
+    Overwrite them unconditionally so the header is always correct.
+    """
+    plan_md = re.sub(r"\*\*Interview:\*\*.*", f"**Interview:** {interview_date}", plan_md, count=1)
+    plan_md = re.sub(r"\*\*Generated:\*\*.*", f"**Generated:** {today}", plan_md, count=1)
     return plan_md

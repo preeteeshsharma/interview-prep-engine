@@ -95,3 +95,46 @@ async def test_get_pending_returns_plan_when_present():
     result = await PrepPlanRepository(mock_session).get_pending(interview_id=7)
 
     assert result is mock_plan
+
+
+# ---------------------------------------------------------------------------
+# get_structured — Bug 5 + Bug 3 shared helper
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_structured_returns_none_when_no_structured_plan():
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    result = await PrepPlanRepository(mock_session).get_structured(interview_id=1)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_structured_fires_exactly_one_query():
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    await PrepPlanRepository(mock_session).get_structured(interview_id=5)
+    mock_session.execute.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_structured_returns_plan_when_found():
+    mock_plan = MagicMock(spec=PrepPlan)
+    mock_plan.vault_path = "moveworks/coding/1778217855-plan.md"
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_plan
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    result = await PrepPlanRepository(mock_session).get_structured(interview_id=1)
+    assert result is mock_plan

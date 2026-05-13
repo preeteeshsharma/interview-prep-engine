@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Interview
@@ -41,8 +41,23 @@ class InterviewRepository:
         return result.scalar_one_or_none()
 
     async def list_active(self) -> list[Interview]:
-        result = await self._session.execute(select(Interview))
+        result = await self._session.execute(
+            select(Interview).where(
+                or_(
+                    Interview.scheduled_for.is_(None),
+                    Interview.scheduled_for >= func.current_date(),
+                )
+            )
+        )
         return list(result.scalars().all())
+
+    async def update_scheduled_for(self, id: int, scheduled_for: datetime) -> Interview:
+        result = await self._session.execute(select(Interview).where(Interview.id == id))
+        interview = result.scalar_one()
+        interview.scheduled_for = scheduled_for
+        await self._session.commit()
+        await self._session.refresh(interview)
+        return interview
 
     async def find_or_create(
         self,

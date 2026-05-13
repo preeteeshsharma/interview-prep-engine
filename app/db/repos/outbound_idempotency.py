@@ -8,7 +8,7 @@ class OutboundIdempotencyRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def record(self, key: str, message_sid: str, status: str = "sent") -> OutboundIdempotency:
+    async def record(self, key: str, status: str = "sent") -> OutboundIdempotency:
         record = OutboundIdempotency(idempotency_key=key, status=status)
         self._session.add(record)
         await self._session.commit()
