@@ -32,7 +32,7 @@ class InterviewRepository:
     ) -> Interview | None:
         conditions = [func.lower(Interview.company) == company.lower()]
         if round_type is not None:
-            conditions.append(Interview.round_type == round_type)
+            conditions.append(func.lower(Interview.round_type) == round_type.lower())
         else:
             conditions.append(Interview.round_type.is_(None))
         result = await self._session.execute(
