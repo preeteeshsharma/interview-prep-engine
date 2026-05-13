@@ -198,6 +198,49 @@ Weak patterns to prioritise:
     return plan_md
 
 
+_SUPPLEMENT_SYSTEM = """You are an interview prep planner adding drills to an existing prep plan.
+
+Given an existing plan and a list of net-new confirmed questions not yet covered,
+generate ONLY the additional ## Day sections needed to cover those questions.
+Follow the same drill format as the existing plan (Pattern/goal, Approach bullets, Time).
+Number days starting from the next day after the last ## Day in the existing plan.
+Output ONLY the new ## Day sections — no header, no metadata, no Weak areas section.
+"""
+
+
+async def generate_supplement(
+    existing_plan: str,
+    net_new_questions: list[str],
+    merged_research: str,
+    company: str,
+    role: str,
+    round_types: list[str],
+    days_until_interview: int,
+) -> str:
+    """Generate drill sections for net-new questions to append to an existing plan."""
+    questions_block = "\n".join(f"- {q}" for q in net_new_questions)
+    user_msg = f"""Existing plan:
+{existing_plan}
+
+Net-new confirmed questions to add drills for (cover these only — do not repeat existing drills):
+{questions_block}
+
+Research context:
+{merged_research}
+
+Company: {company} | Role: {role} | Round types: {", ".join(round_types)}
+Days until interview: {days_until_interview}
+"""
+    result = await complete(
+        messages=[{"role": "user", "content": user_msg}],
+        system=_SUPPLEMENT_SYSTEM,
+        model="claude-haiku-4-5-20251001",
+        max_tokens=3000,
+    )
+    logger.info("generate_supplement.done", company=company, net_new=len(net_new_questions))
+    return result
+
+
 def _fix_header(plan_md: str, interview_date: str, today: str) -> str:
     """Replace LLM-generated header date lines with Python-computed values.
 

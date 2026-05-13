@@ -1,20 +1,40 @@
 """Shared prep execution logic used by both the WhatsApp webhook and the email inbox."""
 from __future__ import annotations
 
+import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from app.agents.researcher import research as run_research
 from app.db.repos.interviews import InterviewRepository
 from app.db.repos.prep_plans import PrepPlanRepository
 from app.db.session import async_session_factory
-from app.integrations.github_client import commit_file
+from app.integrations.github_client import commit_file, load_vault_context
 from app.lib.logging import get_logger
 from app.lib.user_context import get_user_context
-from app.tools.generate_plan import generate_plan
+from app.tools.generate_plan import _extract_confirmed_questions, generate_plan, generate_supplement
 from app.tools.parse_prep_intent import PrepIntent
 
 logger = get_logger(__name__)
+
+
+def _merge_research(existing: str, new_content: str) -> str:
+    if not new_content:
+        return existing
+    if not existing:
+        return new_content
+    if existing.strip() == new_content.strip():
+        return existing
+    today = date.today().isoformat()
+    return f"{existing}\n\n---\n\n## Additional research ({today})\n\n{new_content}"
+
+
+def _net_new_questions(existing: list[str], new: list[str]) -> list[str]:
+    """Questions in `new` not already covered in `existing` (fuzzy substring match)."""
+    def _covered(q: str) -> bool:
+        q_low = q.lower()
+        return any(q_low in e.lower() or e.lower() in q_low for e in existing)
+    return [q for q in new if not _covered(q)]
 
 
 def _first_heading(plan_md: str) -> str | None:
@@ -112,16 +132,57 @@ async def execute_prep(intent: PrepIntent, refresh: bool = False, user_research:
         logger.info("execute_prep.user_research", company=company, chars=len(research))
     else:
         research = await run_research(company, effective_role, round_type=single_round_type, round_label=round_label)
-    plan_md = await generate_plan(
-        interview_id=first_interview.id,
-        company=company,
-        role=effective_role,
-        round_types=round_types,
-        research_context=research,
-        days_until_interview=final.days_until_interview or 7,
-    )
+
+    # Additive refresh: merge research, supplement plan with net-new questions only.
+    plan_md: str | None = None
+    merged_research = research
+    if refresh:
+        company_slug = company.lower().replace(" ", "-")
+        round_slug = (round_label or single_round_type or "general").lower().replace(" ", "-")
+        existing_research, existing_plan_text = await load_vault_context(
+            company_slug, round_slug,
+            github_token=ctx.github_token, vault_repo=ctx.vault_repo,
+        )
+        if existing_research and existing_plan_text:
+            merged_research = _merge_research(existing_research, research)
+            old_qs, new_qs = await asyncio.gather(
+                _extract_confirmed_questions(existing_research),
+                _extract_confirmed_questions(research),
+            )
+            net_new = _net_new_questions(old_qs, new_qs)
+            logger.info("execute_prep.additive", net_new=len(net_new), old=len(old_qs), new=len(new_qs))
+            if not net_new:
+                await commit_plan_to_vault(
+                    first_interview.id, company, existing_plan_text, merged_research,
+                    round_label=round_label or single_round_type,
+                    github_token=ctx.github_token, vault_repo=ctx.vault_repo,
+                )
+                return (
+                    f"Research updated for {company} ({round_label or single_round_type}). "
+                    f"No new questions found — existing plan unchanged."
+                )
+            supplement = await generate_supplement(
+                existing_plan=existing_plan_text,
+                net_new_questions=net_new,
+                merged_research=merged_research,
+                company=company, role=effective_role,
+                round_types=round_types,
+                days_until_interview=final.days_until_interview or 7,
+            )
+            plan_md = existing_plan_text.rstrip() + "\n\n---\n\n" + supplement
+
+    if plan_md is None:
+        plan_md = await generate_plan(
+            interview_id=first_interview.id,
+            company=company,
+            role=effective_role,
+            round_types=round_types,
+            research_context=merged_research,
+            days_until_interview=final.days_until_interview or 7,
+        )
+
     vault_path = await commit_plan_to_vault(
-        first_interview.id, company, plan_md, research,
+        first_interview.id, company, plan_md, merged_research,
         round_label=round_label or single_round_type,
         github_token=ctx.github_token,
         vault_repo=ctx.vault_repo,
